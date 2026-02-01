@@ -1,0 +1,1608 @@
+----- ./repository/OfferSearchRepository.java -----
+package com.example.searchservice.repository;
+
+import com.example.searchservice.model.document.OfferDocument;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
+import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+
+public interface OfferSearchRepository {
+
+    SearchResponse<OfferDocument> search(Query query);
+}
+----- ./repository/ProductSearchRepository.java -----
+package com.example.searchservice.repository;
+
+import com.example.searchservice.model.document.ProductDocument;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
+import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+
+public interface ProductSearchRepository {
+
+    SearchResponse<ProductDocument> search(Query query, int page, int size);
+}
+----- ./repository/SuggestRepository.java -----
+package com.example.searchservice.repository;
+
+import java.util.List;
+
+public interface SuggestRepository {
+
+    List<String> suggest(String prefix, int limit);
+}
+----- ./util/IndexConstants.java -----
+package com.example.searchservice.util;
+
+public class IndexConstants {
+}
+----- ./util/OfferRankingUtil.java -----
+package com.example.searchservice.util;
+
+public final class OfferRankingUtil {
+
+    private OfferRankingUtil() {}
+
+    /* -----------------------------
+       Weights (sum = 1.0)
+       ----------------------------- */
+
+    public static final double PRICE_WEIGHT           = 0.30;
+    public static final double MERCHANT_RATING_WEIGHT = 0.25;
+    public static final double PRODUCT_RATING_WEIGHT  = 0.15;
+    public static final double STOCK_WEIGHT           = 0.10;
+    public static final double SALES_VOLUME_WEIGHT    = 0.10;
+    public static final double CATALOG_SIZE_WEIGHT    = 0.10;
+
+    /* -----------------------------
+       Normalization caps
+       ----------------------------- */
+
+    public static final double MAX_RATING  = 5.0;
+    public static final double MAX_SALES   = 100_000.0;
+    public static final double MAX_CATALOG = 10_000.0;
+
+    /* -----------------------------
+       Painless scripts (SAFE)
+       ----------------------------- */
+
+    // Lower price → higher score
+    public static String priceScoreScript() {
+        return """
+            if (doc['price'].size() == 0) return 0;
+            return Math.min(1.0, params.minPrice / doc['price'].value);
+        """;
+    }
+
+    public static String merchantRatingScript() {
+        return """
+            if (doc['merchantRating'].size() == 0) return 0;
+            return doc['merchantRating'].value / params.maxRating;
+        """;
+    }
+
+    public static String productRatingScript() {
+        return """
+            if (doc['productRating'].size() == 0) return 0;
+            return doc['productRating'].value / params.maxRating;
+        """;
+    }
+
+    public static String salesVolumeScript() {
+        return """
+            if (doc['merchantSalesVolume'].size() == 0) return 0;
+            return Math.log(doc['merchantSalesVolume'].value + 1)
+                 / Math.log(params.maxSales + 1);
+        """;
+    }
+
+    public static String catalogSizeScript() {
+        return """
+            if (doc['merchantCatalogSize'].size() == 0) return 0;
+            return Math.log(doc['merchantCatalogSize'].value + 1)
+                 / Math.log(params.maxCatalog + 1);
+        """;
+    }
+}
+----- ./config/SearchIndexProperties.java -----
+package com.example.searchservice.config;
+
+import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Configuration;
+
+@Data
+@Configuration
+@ConfigurationProperties(prefix = "search.indices")
+public class SearchIndexProperties {
+
+    private String product;
+    private String offer;
+    private String suggest;
+
+}
+----- ./config/ElasticsearchConfig.java -----
+package com.example.searchservice.config;
+
+import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.json.jackson.JacksonJsonpMapper;
+import co.elastic.clients.transport.ElasticsearchTransport;
+import co.elastic.clients.transport.rest_client.RestClientTransport;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import org.apache.http.HttpHeaders;
+import org.apache.http.HttpHost;
+import org.elasticsearch.client.RestClient;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class ElasticsearchConfig {
+
+    @Value("${elasticsearch.endpoint}")
+    private String endpoint;
+
+    @Value("${elasticsearch.api-key}")
+    private String apiKey;
+
+    @Bean
+    public ElasticsearchClient elasticsearchClient() {
+
+        // ✅ Custom ObjectMapper with Java Time support
+        ObjectMapper objectMapper = new ObjectMapper();
+        objectMapper.registerModule(new JavaTimeModule());
+        objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
+        RestClient restClient = RestClient.builder(HttpHost.create(endpoint))
+                .setDefaultHeaders(new org.apache.http.Header[]{
+                        new org.apache.http.message.BasicHeader(
+                                HttpHeaders.AUTHORIZATION,
+                                "ApiKey " + apiKey
+                        )
+                })
+                .build();
+
+        ElasticsearchTransport transport =
+                new RestClientTransport(
+                        restClient,
+                        new JacksonJsonpMapper(objectMapper)
+                );
+
+        return new ElasticsearchClient(transport);
+    }
+}
+----- ./controller.dto/response/ProductSearchResponseDTO.java -----
+package com.example.searchservice.controller.dto.response;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.List;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ProductSearchResponseDTO {
+
+    private List<ProductSummaryDTO> products;
+
+    private long totalHits;
+    private int page;
+    private int size;
+
+    private List<FacetDTO> facets;
+}
+----- ./controller.dto/response/FacetDTO.java -----
+package com.example.searchservice.controller.dto.response;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class FacetDTO {
+
+    private String name;   // brand, price_range, rating
+    private String value;  // Apple, 20k-30k, 4+
+    private long count;
+}
+----- ./controller.dto/response/OfferResponseDTO.java -----
+package com.example.searchservice.controller.dto.response;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class OfferResponseDTO {
+
+    private String merchantId;
+    private double price;
+    private String currency;
+
+    private int availableQty;
+
+    private double merchantRating;
+}
+----- ./controller.dto/response/ProductSummaryDTO.java -----
+package com.example.searchservice.controller.dto.response;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.List;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ProductSummaryDTO {
+
+    private String productId;
+    private String name;
+    private String categoryName;
+
+    private double minPrice;
+    private int merchantCount;
+    private boolean inStock;
+    private double avgRating;
+
+    private List<String> images;
+}
+----- ./controller.dto/request/SuggestRequestDTO.java -----
+package com.example.searchservice.controller.dto.request;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class SuggestRequestDTO {
+
+    private String prefix;
+
+    @Builder.Default
+    private int limit = 10;
+}
+----- ./controller.dto/request/ProductSearchRequestDTO.java -----
+package com.example.searchservice.controller.dto.request;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ProductSearchRequestDTO {
+
+    private String query;
+
+    @Builder.Default
+    private int page = 0;
+
+    @Builder.Default
+    private int size = 20;
+
+    // Optional sorting (future-safe)
+    private String sortBy;      // price | rating | popularity
+    private String sortOrder;   // asc | desc
+}
+----- ./controller.dto/request/FilterSearchRequestDTO.java -----
+package com.example.searchservice.controller.dto.request;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class FilterSearchRequestDTO {
+
+    private String query;
+    private String categoryId;
+
+    private Double minPrice;
+    private Double maxPrice;
+
+    private Boolean inStockOnly;
+
+    private Double minMerchantRating;
+    private Double minProductRating;
+
+    @Builder.Default
+    private int page = 0;
+
+    @Builder.Default
+    private int size = 20;
+}
+----- ./controller/ProductSearchController.java -----
+package com.example.searchservice.controller;
+
+import com.example.searchservice.controller.dto.request.FilterSearchRequestDTO;
+import com.example.searchservice.controller.dto.request.ProductSearchRequestDTO;
+import com.example.searchservice.controller.dto.response.ProductSearchResponseDTO;
+import com.example.searchservice.service.ProductSearchService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/search/products")
+@RequiredArgsConstructor
+public class ProductSearchController {
+
+    private final ProductSearchService productSearchService;
+
+    /**
+     * Full-text product search
+     * Example: GET /search/products?q=iphone&page=0&size=20
+     */
+    @GetMapping
+    public ProductSearchResponseDTO searchProducts(
+            @RequestParam(required = false) String q,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(required = false) String sortOrder
+    ) {
+
+        ProductSearchRequestDTO request = ProductSearchRequestDTO.builder()
+                .query(q)
+                .page(page)
+                .size(size)
+                .sortBy(sortBy)
+                .sortOrder(sortOrder)
+                .build();
+
+        return productSearchService.searchProducts(request);
+    }
+
+    /**
+     * Browse products by category
+     * Example: GET curl "http://localhost:8083/search/products/by-category?categoryId=c10&page=0&size=20"
+     */
+    @GetMapping("/by-category")
+    public ProductSearchResponseDTO browseByCategory(
+            @RequestParam String categoryId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        return productSearchService.browseByCategory(categoryId, page, size);
+    }
+
+    /**
+     * Search with filters
+     * Example:
+     * GET /search/products/filter?q=iphone&categoryId=c10&minPrice=20000&inStockOnly=true
+     */
+    @GetMapping("/filter")
+    public ProductSearchResponseDTO searchWithFilters(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String categoryId,
+            @RequestParam(required = false) Double minPrice,
+            @RequestParam(required = false) Double maxPrice,
+            @RequestParam(required = false) Boolean inStockOnly,
+            @RequestParam(required = false) Double minMerchantRating,
+            @RequestParam(required = false) Double minProductRating,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+
+        FilterSearchRequestDTO request = FilterSearchRequestDTO.builder()
+                .query(q)
+                .categoryId(categoryId)
+                .minPrice(minPrice)
+                .maxPrice(maxPrice)
+                .inStockOnly(inStockOnly)
+                .minMerchantRating(minMerchantRating)
+                .minProductRating(minProductRating)
+                .page(page)
+                .size(size)
+                .build();
+
+        return productSearchService.searchWithFilters(request);
+    }
+}
+----- ./controller/SuggestController.java -----
+package com.example.searchservice.controller;
+
+import com.example.searchservice.controller.dto.request.SuggestRequestDTO;
+import com.example.searchservice.service.SuggestService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/search")
+@RequiredArgsConstructor
+public class SuggestController {
+
+    private final SuggestService suggestService;
+
+    /**
+     * Autocomplete / typeahead
+     * GET /search/suggest
+     */
+    @GetMapping("/suggest")
+    public List<String> getSuggestions(SuggestRequestDTO request) {
+        return suggestService.getSuggestions(request);
+    }
+}
+----- ./controller/OfferRankingController.java -----
+package com.example.searchservice.controller;
+
+import com.example.searchservice.controller.dto.response.OfferResponseDTO;
+import com.example.searchservice.service.OfferRankingService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/search/products")
+@RequiredArgsConstructor
+public class OfferRankingController {
+
+    private final OfferRankingService offerRankingService;
+
+    /**
+     * Ranked offers for product detail page
+     * GET /search/products/{productId}/offers
+     */
+    @GetMapping("/{productId}/offers")
+    public List<OfferResponseDTO> getRankedOffers(
+            @PathVariable String productId
+    ) {
+        return offerRankingService.getRankedOffersForProduct(productId);
+    }
+}
+----- ./SearchServiceApplication.java -----
+package com.example.searchservice;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication(
+        exclude = {
+                org.springframework.boot.elasticsearch.autoconfigure.ElasticsearchClientAutoConfiguration.class
+        }
+)
+public class SearchServiceApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(SearchServiceApplication.class, args);
+    }
+
+}
+----- ./model/document/OfferDocument.java -----
+package com.example.searchservice.model.document;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.time.Instant;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class OfferDocument {
+
+    private String productId;
+    private String merchantId;
+
+    private double price;
+    private String currency;
+
+    private int availableQty;
+
+    private double merchantRating;
+    private double productRating;
+
+    private long merchantSalesVolume;
+    private int merchantCatalogSize;
+
+    private String offerStatus;
+
+    private Instant updatedAt;
+}
+----- ./model/document/SuggestDocument.java -----
+package com.example.searchservice.model.document;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.List;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class SuggestDocument {
+
+    private List<String> input;
+    private int weight;
+}
+----- ./model/document/ProductDocument.java -----
+package com.example.searchservice.model.document;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ProductDocument {
+
+    private String productId;
+
+    private String name;
+    private String description;
+
+    private Category category;
+
+    private List<String> usp;
+    private Map<String, String> attributes;
+    private List<String> images;
+
+    // Aggregated / derived fields
+    private double minPrice;
+    private double maxPrice;
+    private int merchantCount;
+    private boolean inStock;
+    private double avgRating;
+
+    // Popularity & ranking signals
+    private long popularityScore;
+
+    private Instant createdAt;
+
+    // ---------- Nested Types ----------
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class Category {
+        private String id;
+        private String name;
+    }
+}
+----- ./query.impl/ProductSearchQueryBuilderImpl.java -----
+package com.example.searchservice.query.impl;
+
+import co.elastic.clients.json.JsonData;
+import com.example.searchservice.controller.dto.request.FilterSearchRequestDTO;
+import com.example.searchservice.controller.dto.request.ProductSearchRequestDTO;
+import com.example.searchservice.query.ProductSearchQueryBuilder;
+import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
+import co.elastic.clients.elasticsearch._types.query_dsl.MultiMatchQuery;
+import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+import co.elastic.clients.elasticsearch._types.query_dsl.RangeQuery;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
+
+import java.util.ArrayList;
+import java.util.List;
+
+@Component
+public class ProductSearchQueryBuilderImpl implements ProductSearchQueryBuilder {
+
+    @Override
+    public Query buildSearchQuery(ProductSearchRequestDTO request) {
+
+        // If no query text, match all (used by landing pages)
+        if (!StringUtils.hasText(request.getQuery())) {
+            return Query.of(q -> q.matchAll(m -> m));
+        }
+
+        MultiMatchQuery multiMatchQuery = MultiMatchQuery.of(m -> m
+                .query(request.getQuery())
+                .fields(
+                        "name^3",
+                        "usp^2",
+                        "description"
+                )
+        );
+
+        return Query.of(q -> q.multiMatch(multiMatchQuery));
+    }
+
+    @Override
+    public Query buildFilterQuery(FilterSearchRequestDTO request) {
+
+        List<Query> mustQueries = new ArrayList<>();
+        List<Query> filterQueries = new ArrayList<>();
+
+        // -------- Full-text part --------
+        if (StringUtils.hasText(request.getQuery())) {
+            mustQueries.add(
+                    Query.of(q -> q.multiMatch(m -> m
+                            .query(request.getQuery())
+                            .fields("name^3", "usp^2", "description")
+                    ))
+            );
+        }
+
+        // -------- Category filter --------
+        if (StringUtils.hasText(request.getCategoryId())) {
+            filterQueries.add(
+                    Query.of(q -> q.term(t -> t
+                            .field("category.id")
+                            .value(request.getCategoryId())
+                    ))
+            );
+        }
+
+        // -------- Price range filter --------
+        if (request.getMinPrice() != null || request.getMaxPrice() != null) {
+
+            filterQueries.add(
+                    Query.of(q -> q.range(
+                            RangeQuery.of(rq -> rq.untyped(ut -> {
+                                ut.field("minPrice");
+
+                                if (request.getMinPrice() != null) {
+                                    ut.gte(JsonData.of(request.getMinPrice()));
+                                }
+
+                                if (request.getMaxPrice() != null) {
+                                    ut.lte(JsonData.of(request.getMaxPrice()));
+                                }
+
+                                return ut;
+                            }))
+                    ))
+            );
+        }
+
+        // -------- In-stock filter --------
+        if (Boolean.TRUE.equals(request.getInStockOnly())) {
+            filterQueries.add(
+                    Query.of(q -> q.term(t -> t
+                            .field("inStock")
+                            .value(true)
+                    ))
+            );
+        }
+
+        // -------- Rating filters --------
+        if (request.getMinProductRating() != null) {
+
+            filterQueries.add(
+                    Query.of(q -> q.range(
+                            RangeQuery.of(rq -> rq.untyped(ut -> ut
+                                    .field("avgRating")
+                                    .gte(JsonData.of(request.getMinProductRating()))
+                            ))
+                    ))
+            );
+        }
+
+
+        BoolQuery boolQuery = BoolQuery.of(b -> {
+            if (!mustQueries.isEmpty()) {
+                b.must(mustQueries);
+            }
+            if (!filterQueries.isEmpty()) {
+                b.filter(filterQueries);
+            }
+            return b;
+        });
+
+        return Query.of(q -> q.bool(boolQuery));
+    }
+
+    @Override
+    public Query buildCategoryQuery(String categoryId) {
+
+        return Query.of(q -> q.term(t -> t
+                .field("category.id")
+                .value(categoryId)
+        ));
+    }
+}
+----- ./query.impl/OfferRankingQueryBuilderImpl.java -----
+package com.example.searchservice.query.impl;
+
+import com.example.searchservice.query.OfferRankingQueryBuilder;
+import com.example.searchservice.util.OfferRankingUtil;
+import co.elastic.clients.elasticsearch._types.query_dsl.FunctionBoostMode;
+import co.elastic.clients.elasticsearch._types.query_dsl.FunctionScoreMode;
+import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+import co.elastic.clients.json.JsonData;
+import org.springframework.stereotype.Component;
+
+import java.util.Map;
+
+@Component
+public class OfferRankingQueryBuilderImpl implements OfferRankingQueryBuilder {
+
+    @Override
+    public Query buildOfferRankingQuery(String productId) {
+
+        return Query.of(q -> q
+                .functionScore(fs -> fs
+                        .query(qb -> qb
+                                .term(t -> t
+                                        .field("productId")
+                                        .value(productId)
+                                )
+                        )
+                        .scoreMode(FunctionScoreMode.Sum)
+                        .boostMode(FunctionBoostMode.Replace)
+
+                        // 1️⃣ Price (lower is better)
+                        .functions(f -> f
+                                .scriptScore(ss -> ss
+                                        .script(s -> s
+                                                .source(OfferRankingUtil.priceScoreScript())
+                                                .params(Map.of(
+                                                        "minPrice", JsonData.of(1.0)
+                                                ))
+                                        )
+                                )
+                                .weight(OfferRankingUtil.PRICE_WEIGHT)
+                        )
+
+                        // 2️⃣ Merchant rating
+                        .functions(f -> f
+                                .scriptScore(ss -> ss
+                                        .script(s -> s
+                                                .source(OfferRankingUtil.merchantRatingScript())
+                                                .params(Map.of(
+                                                        "maxRating", JsonData.of(OfferRankingUtil.MAX_RATING)
+                                                ))
+                                        )
+                                )
+                                .weight(OfferRankingUtil.MERCHANT_RATING_WEIGHT)
+                        )
+
+                        // 3️⃣ Product rating
+                        .functions(f -> f
+                                .scriptScore(ss -> ss
+                                        .script(s -> s
+                                                .source(OfferRankingUtil.productRatingScript())
+                                                .params(Map.of(
+                                                        "maxRating", JsonData.of(OfferRankingUtil.MAX_RATING)
+                                                ))
+                                        )
+                                )
+                                .weight(OfferRankingUtil.PRODUCT_RATING_WEIGHT)
+                        )
+
+                        // 4️⃣ Stock availability (demotion)
+                        .functions(f -> f
+                                .filter(qf -> qf
+                                        .range(r -> r
+                                                .untyped(ut -> ut
+                                                        .field("availableQty")
+                                                        .gt(JsonData.of(0))
+                                                )
+                                        )
+                                )
+
+                                .weight(OfferRankingUtil.STOCK_WEIGHT)
+                        )
+
+                        // 5️⃣ Merchant sales volume
+                        .functions(f -> f
+                                .scriptScore(ss -> ss
+                                        .script(s -> s
+                                                .source(OfferRankingUtil.salesVolumeScript())
+                                                .params(Map.of(
+                                                        "maxSales", JsonData.of(OfferRankingUtil.MAX_SALES)
+                                                ))
+                                        )
+                                )
+                                .weight(OfferRankingUtil.SALES_VOLUME_WEIGHT)
+                        )
+
+                        // 6️⃣ Merchant catalog size
+                        .functions(f -> f
+                                .scriptScore(ss -> ss
+                                        .script(s -> s
+                                                .source(OfferRankingUtil.catalogSizeScript())
+                                                .params(Map.of(
+                                                        "maxCatalog", JsonData.of(OfferRankingUtil.MAX_CATALOG)
+                                                ))
+                                        )
+                                )
+                                .weight(OfferRankingUtil.CATALOG_SIZE_WEIGHT)
+                        )
+                )
+        );
+    }
+}
+----- ./repository.impl/OfferSearchRepositoryImpl.java -----
+package com.example.searchservice.repository.impl;
+
+import com.example.searchservice.config.SearchIndexProperties;
+import com.example.searchservice.model.document.OfferDocument;
+import com.example.searchservice.repository.OfferSearchRepository;
+import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
+import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Repository;
+
+@Repository
+@RequiredArgsConstructor
+public class OfferSearchRepositoryImpl implements OfferSearchRepository {
+
+    private final ElasticsearchClient elasticsearchClient;
+    private final SearchIndexProperties indexProperties;
+
+    @Override
+    public SearchResponse<OfferDocument> search(Query query) {
+        try {
+            return elasticsearchClient.search(
+                    s -> s
+                            .index(indexProperties.getOffer())
+                            .query(query),
+                    OfferDocument.class
+            );
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to execute offer search query", e);
+        }
+    }
+}
+----- ./repository.impl/SuggestRepositoryImpl.java -----
+package com.example.searchservice.repository.impl;
+
+import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
+import co.elastic.clients.elasticsearch.core.search.CompletionSuggestOption;
+import com.example.searchservice.config.SearchIndexProperties;
+import com.example.searchservice.repository.SuggestRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+
+@Repository
+@RequiredArgsConstructor
+public class SuggestRepositoryImpl implements SuggestRepository {
+
+    private final ElasticsearchClient elasticsearchClient;
+    private final SearchIndexProperties indexProperties;
+
+    @Override
+    public List<String> suggest(String prefix, int limit) {
+
+        try {
+            SearchResponse<Void> response = elasticsearchClient.search(
+                    s -> s
+                            .index(indexProperties.getSuggest())
+                            .suggest(sg -> sg
+                                    .suggesters("product-suggest", sug -> sug
+                                            .prefix(prefix)
+                                            .completion(c -> c
+                                                    .field("suggest")
+                                                    .size(limit)
+                                            )
+                                    )
+                            ),
+                    Void.class
+            );
+
+            return response.suggest()
+                    .get("product-suggest")
+                    .getFirst()
+                    .completion()
+                    .options()
+                    .stream()
+                    .map(CompletionSuggestOption::text)
+                    .toList();
+
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to fetch suggestions", e);
+        }
+    }
+}
+----- ./repository.impl/ProductSearchRepositoryImpl.java -----
+package com.example.searchservice.repository.impl;
+
+import com.example.searchservice.config.SearchIndexProperties;
+import com.example.searchservice.model.document.ProductDocument;
+import com.example.searchservice.repository.ProductSearchRepository;
+import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
+import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Repository;
+
+@Repository
+@RequiredArgsConstructor
+public class ProductSearchRepositoryImpl implements ProductSearchRepository {
+
+    private final ElasticsearchClient elasticsearchClient;
+    private final SearchIndexProperties indexProperties;
+
+    @Override
+    public SearchResponse<ProductDocument> search(Query query, int page, int size) {
+
+        int from = page * size;
+
+        try {
+            return elasticsearchClient.search(s -> s
+                            .index(indexProperties.getProduct())
+                            .from(from)
+                            .size(size)
+                            .query(query),
+                    ProductDocument.class
+            );
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to execute product search query", e);
+        }
+    }
+}
+----- ./service.impl/SuggestServiceImpl.java -----
+package com.example.searchservice.service.impl;
+
+import com.example.searchservice.controller.dto.request.SuggestRequestDTO;
+import com.example.searchservice.repository.SuggestRepository;
+import com.example.searchservice.service.SuggestService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+public class SuggestServiceImpl implements SuggestService {
+
+    //private final SuggestQueryBuilder queryBuilder;
+    private final SuggestRepository repository;
+
+    @Override
+    public List<String> getSuggestions(SuggestRequestDTO request) {
+
+        return repository.suggest(
+                request.getPrefix(),
+                request.getLimit()
+        );
+    }
+}
+----- ./service.impl/OfferRankingServiceImpl.java -----
+package com.example.searchservice.service.impl;
+
+import co.elastic.clients.elasticsearch.core.SearchResponse;
+import com.example.searchservice.controller.dto.response.OfferResponseDTO;
+import com.example.searchservice.model.document.OfferDocument;
+import com.example.searchservice.query.OfferRankingQueryBuilder;
+import com.example.searchservice.repository.OfferSearchRepository;
+import com.example.searchservice.service.OfferRankingService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Service
+@RequiredArgsConstructor
+public class OfferRankingServiceImpl implements OfferRankingService {
+
+    private final OfferRankingQueryBuilder queryBuilder;
+    private final OfferSearchRepository repository;
+
+    @Override
+    public List<OfferResponseDTO> getRankedOffersForProduct(String productId) {
+
+        var query = queryBuilder.buildOfferRankingQuery(productId);
+        SearchResponse<OfferDocument> response = repository.search(query);
+
+        return response.hits()
+                .hits()
+                .stream()
+                .map(hit -> mapToResponse(hit.source()))
+                .filter(dto -> dto != null)
+                .collect(Collectors.toList());
+    }
+
+    private OfferResponseDTO mapToResponse(OfferDocument doc) {
+
+        if (doc == null) {
+            return null;
+        }
+
+        return OfferResponseDTO.builder()
+                .merchantId(doc.getMerchantId())
+                .price(doc.getPrice())
+                .currency(doc.getCurrency())
+                .availableQty(doc.getAvailableQty())
+                .merchantRating(doc.getMerchantRating())
+                .build();
+    }
+}
+----- ./service.impl/ProductSearchServiceImpl.java -----
+package com.example.searchservice.service.impl;
+
+import com.example.searchservice.controller.dto.request.FilterSearchRequestDTO;
+import com.example.searchservice.controller.dto.request.ProductSearchRequestDTO;
+import com.example.searchservice.controller.dto.response.ProductSearchResponseDTO;
+import com.example.searchservice.controller.dto.response.ProductSummaryDTO;
+import com.example.searchservice.model.document.ProductDocument;
+import com.example.searchservice.query.ProductSearchQueryBuilder;
+import com.example.searchservice.repository.ProductSearchRepository;
+import com.example.searchservice.service.ProductSearchService;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Service
+@RequiredArgsConstructor
+public class ProductSearchServiceImpl implements ProductSearchService {
+
+    private final ProductSearchQueryBuilder queryBuilder;
+    private final ProductSearchRepository repository;
+
+    @Override
+    public ProductSearchResponseDTO searchProducts(ProductSearchRequestDTO request) {
+
+        var query = queryBuilder.buildSearchQuery(request);
+        SearchResponse<ProductDocument> response =
+                repository.search(query, request.getPage(), request.getSize());
+
+        return buildResponse(response, request.getPage(), request.getSize());
+    }
+
+    @Override
+    public ProductSearchResponseDTO searchWithFilters(FilterSearchRequestDTO request) {
+
+        var query = queryBuilder.buildFilterQuery(request);
+        SearchResponse<ProductDocument> response =
+                repository.search(query, request.getPage(), request.getSize());
+
+        return buildResponse(response, request.getPage(), request.getSize());
+    }
+
+    @Override
+    public ProductSearchResponseDTO browseByCategory(String categoryId, int page, int size) {
+
+        var query = queryBuilder.buildCategoryQuery(categoryId);
+        SearchResponse<ProductDocument> response =
+                repository.search(query, page, size);
+
+        return buildResponse(response, page, size);
+    }
+
+    // ----------------- Helpers -----------------
+
+    private ProductSearchResponseDTO buildResponse(
+            SearchResponse<ProductDocument> response,
+            int page,
+            int size
+    ) {
+
+        List<ProductSummaryDTO> products = response.hits()
+                .hits()
+                .stream()
+                .map(hit -> mapToSummary(hit.source()))
+                .collect(Collectors.toList());
+
+        long totalHits = response.hits().total() != null
+                ? response.hits().total().value()
+                : products.size();
+
+        return ProductSearchResponseDTO.builder()
+                .products(products)
+                .totalHits(totalHits)
+                .page(page)
+                .size(size)
+                .facets(null) // Facets wired in next step
+                .build();
+    }
+
+    private ProductSummaryDTO mapToSummary(ProductDocument doc) {
+
+        if (doc == null) {
+            return null;
+        }
+
+        return ProductSummaryDTO.builder()
+                .productId(doc.getProductId())
+                .name(doc.getName())
+                .categoryName(
+                        doc.getCategory() != null
+                                ? doc.getCategory().getName()
+                                : null
+                )
+                .minPrice(doc.getMinPrice())
+                .merchantCount(doc.getMerchantCount())
+                .inStock(doc.isInStock())
+                .avgRating(doc.getAvgRating())
+                .images(doc.getImages())
+                .build();
+    }
+}
+----- ./service/ProductSearchService.java -----
+package com.example.searchservice.service;
+
+import com.example.searchservice.controller.dto.request.FilterSearchRequestDTO;
+import com.example.searchservice.controller.dto.request.ProductSearchRequestDTO;
+import com.example.searchservice.controller.dto.response.ProductSearchResponseDTO;
+
+public interface ProductSearchService {
+
+    ProductSearchResponseDTO searchProducts(ProductSearchRequestDTO request);
+
+    ProductSearchResponseDTO searchWithFilters(FilterSearchRequestDTO request);
+
+    ProductSearchResponseDTO browseByCategory(String categoryId, int page, int size);
+}
+----- ./service/SuggestService.java -----
+package com.example.searchservice.service;
+
+import com.example.searchservice.controller.dto.request.SuggestRequestDTO;
+
+import java.util.List;
+
+public interface SuggestService {
+
+    List<String> getSuggestions(SuggestRequestDTO request);
+}
+----- ./service/OfferRankingService.java -----
+package com.example.searchservice.service;
+
+import com.example.searchservice.controller.dto.response.OfferResponseDTO;
+
+import java.util.List;
+
+public interface OfferRankingService {
+
+    List<OfferResponseDTO> getRankedOffersForProduct(String productId);
+}
+----- ./query/ProductSearchQueryBuilder.java -----
+package com.example.searchservice.query;
+
+import com.example.searchservice.controller.dto.request.FilterSearchRequestDTO;
+import com.example.searchservice.controller.dto.request.ProductSearchRequestDTO;
+import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+
+public interface ProductSearchQueryBuilder {
+
+    Query buildSearchQuery(ProductSearchRequestDTO request);
+
+    Query buildFilterQuery(FilterSearchRequestDTO request);
+
+    Query buildCategoryQuery(String categoryId);
+}
+----- ./query/SuggestQueryBuilder.java -----
+package com.example.searchservice.query;
+
+public interface SuggestQueryBuilder {
+
+    Object buildSuggestQuery(String prefix, int limit);
+}
+----- ./query/OfferRankingQueryBuilder.java -----
+package com.example.searchservice.query;
+
+import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+
+public interface OfferRankingQueryBuilder {
+
+    Query buildOfferRankingQuery(String productId);
+}
+----- ./tree.txt -----
+.
+├── SearchServiceApplication.java
+├── config
+│   ├── ElasticsearchConfig.java
+│   └── SearchIndexProperties.java
+├── controller
+│   ├── OfferRankingController.java
+│   ├── ProductSearchController.java
+│   └── SuggestController.java
+├── controller.dto
+│   ├── request
+│   │   ├── FilterSearchRequestDTO.java
+│   │   ├── ProductSearchRequestDTO.java
+│   │   └── SuggestRequestDTO.java
+│   └── response
+│       ├── FacetDTO.java
+│       ├── OfferResponseDTO.java
+│       ├── ProductSearchResponseDTO.java
+│       └── ProductSummaryDTO.java
+├── exception
+├── indexer
+│   ├── builder
+│   ├── consumer
+│   │   ├── InventoryCdcConsumer.java
+│   │   ├── OfferCdcConsumer.java
+│   │   └── ProductCdcConsumer.java
+│   ├── dlq
+│   ├── event
+│   │   ├── CdcEvent.java
+│   │   ├── DebeziumPayload.java
+│   │   └── EventType.java
+│   ├── processor
+│   │   ├── OfferEventProcessor.java
+│   │   ├── ProductEventProcessor.java
+│   │   └── SuggestEventProcessor.java
+│   ├── snapshot
+│   └── writer
+│       ├── BulkOperationFactory.java
+│       └── ElasticBulkWriter.java
+├── model
+│   └── document
+│       ├── OfferDocument.java
+│       ├── ProductDocument.java
+│       └── SuggestDocument.java
+├── query
+│   ├── OfferRankingQueryBuilder.java
+│   ├── ProductSearchQueryBuilder.java
+│   └── SuggestQueryBuilder.java
+├── query.impl
+│   ├── OfferRankingQueryBuilderImpl.java
+│   └── ProductSearchQueryBuilderImpl.java
+├── repository
+│   ├── OfferSearchRepository.java
+│   ├── ProductSearchRepository.java
+│   └── SuggestRepository.java
+├── repository.impl
+│   ├── OfferSearchRepositoryImpl.java
+│   ├── ProductSearchRepositoryImpl.java
+│   └── SuggestRepositoryImpl.java
+├── service
+│   ├── OfferRankingService.java
+│   ├── ProductSearchService.java
+│   └── SuggestService.java
+├── service.impl
+│   ├── OfferRankingServiceImpl.java
+│   ├── ProductSearchServiceImpl.java
+│   └── SuggestServiceImpl.java
+├── tree.txt
+└── util
+    ├── IndexConstants.java
+    └── OfferRankingUtil.java
+
+24 directories, 47 files
+----- ./indexer/processor/SuggestEventProcessor.java -----
+package com.example.searchservice.indexer.processor;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+@Slf4j
+@Service
+public class SuggestEventProcessor {
+    // wired later
+}
+
+----- ./indexer/processor/ProductEventProcessor.java -----
+package com.example.searchservice.indexer.processor;
+
+import com.example.searchservice.indexer.event.CdcEvent;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+@Slf4j
+@Service
+public class ProductEventProcessor {
+
+    public void process(CdcEvent<?> event) {
+        log.info("Processing product event: {}", event);
+        // next: map → ProductDocument → bulk writer
+    }
+}
+----- ./indexer/processor/OfferEventProcessor.java -----
+package com.example.searchservice.indexer.processor;
+
+import com.example.searchservice.indexer.event.CdcEvent;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+@Slf4j
+@Service
+public class OfferEventProcessor {
+
+    public void process(CdcEvent<?> event) {
+        log.info("Processing offer event: {}", event);
+        // next: upsert offer + update product aggregates
+    }
+}
+----- ./indexer/writer/ElasticBulkWriter.java -----
+package com.example.searchservice.indexer.writer;
+
+import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.core.BulkRequest;
+import co.elastic.clients.elasticsearch.core.BulkResponse;
+import co.elastic.clients.elasticsearch.core.bulk.BulkOperation;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+import java.util.ArrayList;
+import java.util.List;
+
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class ElasticBulkWriter {
+
+    private static final int MAX_BULK_SIZE = 200;
+    private static final int MAX_RETRIES = 3;
+
+    private final ElasticsearchClient elasticsearchClient;
+
+    private final List<BulkOperation> buffer = new ArrayList<>();
+
+    // ---------- Public API ----------
+
+    public synchronized void upsert(String index, String id, Object document) {
+        buffer.add(
+                BulkOperationFactory.upsert(index, id, document)
+        );
+        flushIfNeeded();
+    }
+
+    public synchronized void delete(String index, String id) {
+        buffer.add(
+                BulkOperationFactory.delete(index, id)
+        );
+        flushIfNeeded();
+    }
+
+    public synchronized void flush() {
+        if (buffer.isEmpty()) {
+            return;
+        }
+
+        List<BulkOperation> batch = new ArrayList<>(buffer);
+        buffer.clear();
+
+        executeWithRetry(batch);
+    }
+
+    // ---------- Internal helpers ----------
+
+    private void flushIfNeeded() {
+        if (buffer.size() >= MAX_BULK_SIZE) {
+            flush();
+        }
+    }
+
+    private void executeWithRetry(List<BulkOperation> operations) {
+
+        int attempt = 0;
+
+        while (attempt < MAX_RETRIES) {
+            attempt++;
+
+            try {
+                BulkRequest request = BulkRequest.of(b -> b
+                        .operations(operations)
+                );
+
+                BulkResponse response =
+                        elasticsearchClient.bulk(request);
+
+                if (!response.errors()) {
+                    log.debug("Bulk indexed {} operations", operations.size());
+                    return;
+                }
+
+                // Partial failures
+                log.warn("Bulk had errors, attempt {}", attempt);
+                handlePartialFailures(response, operations);
+
+            } catch (Exception ex) {
+                log.error(
+                        "Bulk indexing failed on attempt {}",
+                        attempt,
+                        ex
+                );
+            }
+
+            sleepBackoff(attempt);
+        }
+
+        // After retries exhausted
+        log.error(
+                "Bulk indexing permanently failed for {} operations",
+                operations.size()
+        );
+
+        // Next step: push to DLQ (we’ll wire this later)
+    }
+
+    private void handlePartialFailures(
+            BulkResponse response,
+            List<BulkOperation> operations
+    ) {
+
+        response.items().forEach(item -> {
+            if (item.error() != null) {
+                log.error(
+                        "Failed bulk item: index={}, id={}, reason={}",
+                        item.index(),
+                        item.id(),
+                        item.error().reason()
+                );
+                // Later: send this op to DLQ
+            }
+        });
+    }
+
+    private void sleepBackoff(int attempt) {
+        try {
+            Thread.sleep(100L * attempt);
+        } catch (InterruptedException ignored) {
+        }
+    }
+}
+----- ./indexer/writer/BulkOperationFactory.java -----
+package com.example.searchservice.indexer.writer;
+
+import co.elastic.clients.elasticsearch.core.bulk.BulkOperation;
+import co.elastic.clients.json.JsonData;
+
+public final class BulkOperationFactory {
+
+    private BulkOperationFactory() {}
+
+    public static BulkOperation upsert(
+            String index,
+            String id,
+            Object document
+    ) {
+        return BulkOperation.of(b -> b
+                .update(u -> u
+                        .index(index)
+                        .id(id)
+                        .action(a -> a
+                                .doc(JsonData.of(document))
+                                .docAsUpsert(true)
+                        )
+                )
+        );
+    }
+
+    public static BulkOperation delete(
+            String index,
+            String id
+    ) {
+        return BulkOperation.of(b -> b
+                .delete(d -> d
+                        .index(index)
+                        .id(id)
+                )
+        );
+    }
+}
+----- ./indexer/consumer/OfferCdcConsumer.java -----
+package com.example.searchservice.indexer.consumer;
+
+import com.example.searchservice.indexer.event.CdcEvent;
+import com.example.searchservice.indexer.processor.OfferEventProcessor;
+import lombok.RequiredArgsConstructor;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.stereotype.Component;
+
+@Component
+@RequiredArgsConstructor
+public class OfferCdcConsumer {
+
+    private final OfferEventProcessor processor;
+
+    @KafkaListener(
+            topics = "offer.cdc",
+            groupId = "search-indexer"
+    )
+    public void onMessage(CdcEvent<?> event) {
+        processor.process(event);
+    }
+}----- ./indexer/consumer/ProductCdcConsumer.java -----
+package com.example.searchservice.indexer.consumer;
+import com.example.searchservice.indexer.event.CdcEvent;
+import com.example.searchservice.indexer.processor.ProductEventProcessor;
+import lombok.RequiredArgsConstructor;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.stereotype.Component;
+
+@Component
+@RequiredArgsConstructor
+public class ProductCdcConsumer {
+
+    private final ProductEventProcessor processor;
+
+    @KafkaListener(
+            topics = "product.cdc",
+            groupId = "search-indexer"
+    )
+    public void onMessage(CdcEvent<?> event) {
+        processor.process(event);
+    }
+}----- ./indexer/consumer/InventoryCdcConsumer.java -----
+package com.example.searchservice.indexer.consumer;
+
+import com.example.searchservice.indexer.event.CdcEvent;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.stereotype.Component;
+
+@Slf4j
+@Component
+public class InventoryCdcConsumer {
+
+    @KafkaListener(
+            topics = "inventory.cdc",
+            groupId = "search-indexer"
+    )
+    public void onMessage(CdcEvent<?> event) {
+        log.info("Inventory event received: {}", event);
+    }
+}
+----- ./indexer/event/CdcEvent.java -----
+package com.example.searchservice.indexer.event;
+
+import lombok.Data;
+
+@Data
+public class CdcEvent<T> {
+
+    private String entityId;     // Kafka key
+    private EventType eventType; // CREATE / UPDATE / DELETE
+    private T payload;           // Row data
+    private long version;        // LSN / timestamp / offset
+}
+----- ./indexer/event/DebeziumPayload.java -----
+package com.example.searchservice.indexer.event;
+
+import lombok.Data;
+
+@Data
+public class DebeziumPayload<T> {
+
+    private T before;
+    private T after;
+    private String op; // c / u / d
+    private long ts_ms;
+}----- ./indexer/event/EventType.java -----
+package com.example.searchservice.indexer.event;
+
+public enum EventType {
+    CREATE,
+    UPDATE,
+    DELETE
+}

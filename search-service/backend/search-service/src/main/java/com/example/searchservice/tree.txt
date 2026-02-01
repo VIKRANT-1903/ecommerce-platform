@@ -1,0 +1,73 @@
+.
+├── SearchServiceApplication.java
+├── config
+│   ├── ElasticsearchConfig.java
+│   └── SearchIndexProperties.java
+├── controller
+│   ├── OfferRankingController.java
+│   ├── ProductSearchController.java
+│   └── SuggestController.java
+├── controller.dto
+│   ├── request
+│   │   ├── FilterSearchRequestDTO.java
+│   │   ├── ProductSearchRequestDTO.java
+│   │   └── SuggestRequestDTO.java
+│   └── response
+│       ├── FacetDTO.java
+│       ├── OfferResponseDTO.java
+│       ├── ProductSearchResponseDTO.java
+│       └── ProductSummaryDTO.java
+├── exception
+├── indexer
+│   ├── builder
+│   ├── consumer
+│   │   ├── InventoryCdcConsumer.java
+│   │   ├── OfferCdcConsumer.java
+│   │   └── ProductCdcConsumer.java
+│   ├── dlq
+│   ├── event
+│   │   ├── CdcEvent.java
+│   │   ├── DebeziumPayload.java
+│   │   └── EventType.java
+│   ├── processor
+│   │   ├── OfferEventProcessor.java
+│   │   ├── ProductEventProcessor.java
+│   │   └── SuggestEventProcessor.java
+│   ├── snapshot
+│   └── writer
+│       ├── BulkOperationFactory.java
+│       └── ElasticBulkWriter.java
+├── model
+│   └── document
+│       ├── OfferDocument.java
+│       ├── ProductDocument.java
+│       └── SuggestDocument.java
+├── query
+│   ├── OfferRankingQueryBuilder.java
+│   ├── ProductSearchQueryBuilder.java
+│   └── SuggestQueryBuilder.java
+├── query.impl
+│   ├── OfferRankingQueryBuilderImpl.java
+│   └── ProductSearchQueryBuilderImpl.java
+├── repository
+│   ├── OfferSearchRepository.java
+│   ├── ProductSearchRepository.java
+│   └── SuggestRepository.java
+├── repository.impl
+│   ├── OfferSearchRepositoryImpl.java
+│   ├── ProductSearchRepositoryImpl.java
+│   └── SuggestRepositoryImpl.java
+├── service
+│   ├── OfferRankingService.java
+│   ├── ProductSearchService.java
+│   └── SuggestService.java
+├── service.impl
+│   ├── OfferRankingServiceImpl.java
+│   ├── ProductSearchServiceImpl.java
+│   └── SuggestServiceImpl.java
+├── tree.txt
+└── util
+    ├── IndexConstants.java
+    └── OfferRankingUtil.java
+
+24 directories, 47 files

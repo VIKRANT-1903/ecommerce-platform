@@ -1,0 +1,2 @@
+-- Initial schema placeholder
+-- Add your database migrations here
