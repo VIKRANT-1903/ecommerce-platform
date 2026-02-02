@@ -69,7 +69,7 @@ public class CheckoutService {
                     log.warn("Reserve failed for {}: {}", reserveReq, result.message());
                     compensateReserve(reserved);
                     completeFailure(orderId, userId);
-                    cartService.clearCart(userId);
+                    // Don't clear cart on failure - let user try again
                     emailService.sendOrderConfirmation(orderId, userId, false);
                     return CheckoutResponse.failure(orderId, result.message());
                 }
@@ -79,7 +79,7 @@ public class CheckoutService {
             log.warn("Reserve failed: {}", e.getMessage());
             compensateReserve(reserved);
             completeFailure(orderId, userId);
-            cartService.clearCart(userId);
+            // Don't clear cart on failure - let user try again
             emailService.sendOrderConfirmation(orderId, userId, false);
             return CheckoutResponse.failure(orderId, e.getMessage());
         }
@@ -88,11 +88,11 @@ public class CheckoutService {
         boolean paymentSuccess = paymentGateway.processPayment(orderId, order.totalAmount());
 
         if (!paymentSuccess) {
-            // 5b. Payment failure: release inventory, mark FAILED, clear cart, notify
+            // 5b. Payment failure: release inventory, mark FAILED, notify (keep cart)
             log.info("Payment failed for order {}, releasing inventory", orderId);
             compensateReserve(reserved);
             completeFailure(orderId, userId);
-            cartService.clearCart(userId);
+            // Don't clear cart on payment failure - let user retry
             emailService.sendOrderConfirmation(orderId, userId, false);
             return CheckoutResponse.failure(orderId, "Payment failed");
         }
@@ -111,7 +111,7 @@ public class CheckoutService {
             log.error("Confirm failed for order {}: {}", orderId, e.getMessage());
             compensateReserve(reserved);
             completeFailure(orderId, userId);
-            cartService.clearCart(userId);
+            // Don't clear cart on confirm failure - let user retry
             emailService.sendOrderConfirmation(orderId, userId, false);
             return CheckoutResponse.failure(orderId, "Inventory confirm failed: " + e.getMessage());
         }

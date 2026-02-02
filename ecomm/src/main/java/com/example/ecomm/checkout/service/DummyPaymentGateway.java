@@ -14,7 +14,7 @@ public class DummyPaymentGateway implements PaymentGateway {
 
     @Override
     public boolean processPayment(Long orderId, BigDecimal amount) {
-        boolean success = random.nextBoolean();
+        boolean success = true;
         log.info("Dummy payment for order {} amount {}: {}", orderId, amount, success ? "SUCCESS" : "FAILED");
         return success;
     }
