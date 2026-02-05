@@ -82,12 +82,7 @@ function App() {
         />
 
         {/* Public shopping routes (guests can browse) */}
-        <Route path="search" element={
-          <PublicRoute>
-            <ProductSearch />
-          </PublicRoute>
-          
-          } />
+        <Route path="search" element={<ProductSearch />} />
         <Route path="product/:id" element={
           <PublicRoute>
           <ProductDetail />
