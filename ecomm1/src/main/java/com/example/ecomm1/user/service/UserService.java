@@ -1,6 +1,7 @@
 package com.example.ecomm1.user.service;
 
 import com.example.ecomm1.common.config.SecurityUtils;
+import com.example.ecomm1.merchant.repository.MerchantRepository;
 import com.example.ecomm1.user.dto.UpdateUserRequest;
 import com.example.ecomm1.user.dto.UserProfileResponse;
 import com.example.ecomm1.user.exception.UserNotFoundException;
@@ -17,12 +18,21 @@ import org.springframework.transaction.annotation.Transactional;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final MerchantRepository merchantRepository;
 
     public UserProfileResponse getCurrentUserProfile() {
         Long userId = SecurityUtils.getCurrentUserId();
         log.debug("Fetching profile for userId={}", userId);
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
+
+        // Get merchantId if user is a merchant
+        Long merchantId = null;
+        if (user.getRole().name().equals("MERCHANT")) {
+            merchantId = merchantRepository.findByUser_Id(userId)
+                    .map(merchant -> merchant.getMerchantId())
+                    .orElse(null);
+        }
 
         return UserProfileResponse.builder()
                 .id(user.getId())
@@ -31,6 +41,7 @@ public class UserService {
                 .lastName(user.getLastName())
                 .phone(user.getPhone())
                 .role(user.getRole())
+                .merchantId(merchantId)
                 .createdAt(user.getCreatedAt())
                 .build();
     }
@@ -54,6 +65,14 @@ public class UserService {
 
         user = userRepository.save(user);
 
+        // Get merchantId if user is a merchant
+        Long merchantId = null;
+        if (user.getRole().name().equals("MERCHANT")) {
+            merchantId = merchantRepository.findByUser_Id(userId)
+                    .map(merchant -> merchant.getMerchantId())
+                    .orElse(null);
+        }
+
         return UserProfileResponse.builder()
                 .id(user.getId())
                 .email(user.getEmail())
@@ -61,6 +80,7 @@ public class UserService {
                 .lastName(user.getLastName())
                 .phone(user.getPhone())
                 .role(user.getRole())
+                .merchantId(merchantId)
                 .createdAt(user.getCreatedAt())
                 .build();
     }

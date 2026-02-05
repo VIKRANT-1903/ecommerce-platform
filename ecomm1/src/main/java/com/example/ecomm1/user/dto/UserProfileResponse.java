@@ -20,5 +20,6 @@ public class UserProfileResponse {
     private String lastName;
     private String phone;
     private Role role;
+    private Long merchantId;
     private LocalDateTime createdAt;
 }
