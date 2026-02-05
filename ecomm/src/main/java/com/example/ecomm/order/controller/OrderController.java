@@ -9,6 +9,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import java.util.List;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -40,5 +42,11 @@ public class OrderController {
     public ResponseEntity<ApiResponse<OrderResponse>> getOrder(@PathVariable Long orderId) {
         OrderResponse order = orderService.getOrder(orderId);
         return ResponseEntity.ok(ApiResponse.success(order));
+    }
+
+    @GetMapping("/users/{userId}/orders")
+    public ResponseEntity<ApiResponse<List<OrderResponse>>> listUserOrders(@PathVariable Integer userId) {
+        List<OrderResponse> orders = orderService.listOrdersByUser(userId);
+        return ResponseEntity.ok(ApiResponse.success(orders));
     }
 }

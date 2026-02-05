@@ -13,20 +13,23 @@ import {
   ArrowRight,
   Package,
   ShieldCheck,
+  LogIn,
 } from 'lucide-react';
 
 const Cart = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const {
     cart,
     loading,
     cartItemCount,
     cartTotal,
     productDetails,
+    getItemPrice,
     updateCartItem,
     removeFromCart,
     fetchCart,
+    isGuest,
   } = useCart();
   
   const [localProductDetails, setLocalProductDetails] = useState({});
@@ -190,10 +193,10 @@ const Cart = () => {
                 <div className="hidden lg:flex flex-col items-end justify-between">
                   <div className="text-right">
                     <p className="text-lg font-bold text-gray-900">
-                      ${(item.priceSnapshot * item.quantity).toFixed(2)}
+                      ${(getItemPrice(item) * item.quantity).toFixed(2)}
                     </p>
                     <p className="text-sm text-gray-500">
-                      ${item.priceSnapshot.toFixed(2)} each
+                      ${getItemPrice(item).toFixed(2)} each
                     </p>
                   </div>
                   
@@ -260,9 +263,25 @@ const Cart = () => {
               onClick={() => navigate('/checkout')}
               className="w-full btn-buy-now py-3 flex items-center justify-center gap-2"
             >
-              Proceed to Checkout
-              <ArrowRight className="w-5 h-5" />
+              {isGuest ? (
+                <>
+                  Sign in to Checkout
+                  <LogIn className="w-5 h-5" />
+                </>
+              ) : (
+                <>
+                  Proceed to Checkout
+                  <ArrowRight className="w-5 h-5" />
+                </>
+              )}
             </button>
+
+            {/* Guest notice */}
+            {isGuest && (
+              <p className="text-sm text-gray-500 text-center mt-3">
+                Your cart items will be saved when you sign in
+              </p>
+            )}
 
             {/* Trust Badges */}
             <div className="mt-6 pt-4 border-t border-gray-200 space-y-3">

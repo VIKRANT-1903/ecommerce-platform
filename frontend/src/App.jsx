@@ -15,6 +15,7 @@ import MerchantProducts from './pages/MerchantProducts';
 import MerchantOffers from './pages/MerchantOffers';
 import MerchantInventory from './pages/MerchantInventory';
 import OrderDetails from './pages/OrderDetails';
+import Orders from './pages/Orders';
 import LoadingSpinner from './components/common/LoadingSpinner';
 
 // Protected Route wrapper
@@ -80,31 +81,21 @@ function App() {
           }
         />
 
-        {/* Protected routes */}
-        <Route
-          path="search"
-          element={
-            <ProtectedRoute>
-              <ProductSearch />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="product/:id"
-          element={
-            <ProtectedRoute>
-              <ProductDetail />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="cart"
-          element={
-            <ProtectedRoute>
-              <Cart />
-            </ProtectedRoute>
-          }
-        />
+        {/* Public shopping routes (guests can browse) */}
+        <Route path="search" element={
+          <PublicRoute>
+            <ProductSearch />
+          </PublicRoute>
+          
+          } />
+        <Route path="product/:id" element={
+          <PublicRoute>
+          <ProductDetail />
+          </PublicRoute>
+          } />
+        <Route path="cart" element={<Cart />} />
+
+        {/* Protected routes (require login) */}
         <Route
           path="checkout"
           element={
@@ -134,6 +125,14 @@ function App() {
           element={
             <ProtectedRoute>
               <Profile />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="orders"
+          element={
+            <ProtectedRoute>
+              <Orders />
             </ProtectedRoute>
           }
         />

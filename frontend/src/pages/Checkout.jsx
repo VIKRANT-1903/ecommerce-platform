@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { getData } from 'country-list';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { productService } from '../services/authService';
@@ -16,8 +17,8 @@ import {
 
 const Checkout = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const { cart, cartItemCount, cartTotal, checkout, productDetails, fetchCart } = useCart();
+  const { user, isAuthenticated } = useAuth();
+  const { cart, cartItemCount, cartTotal, checkout, productDetails, fetchCart, isGuest, getItemPrice } = useCart();
   
   const [shippingAddress, setShippingAddress] = useState({
     street: '',
@@ -30,6 +31,14 @@ const Checkout = () => {
   const [loading, setLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState(null);
   const [errors, setErrors] = useState({});
+
+  useEffect(() => {
+    if (!isAuthenticated || isGuest) {
+      navigate('/login?redirect=/checkout', { 
+        state: { from: '/checkout', message: 'Please sign in to complete your purchase' } 
+      });
+    }
+  }, [isAuthenticated, isGuest, navigate]);
 
   useEffect(() => {
     if (user?.id) {
@@ -238,9 +247,11 @@ const Checkout = () => {
                       onChange={handleChange}
                       className="input-field"
                     >
-                      <option value="United States">United States</option>
-                      <option value="Canada">Canada</option>
-                      <option value="United Kingdom">United Kingdom</option>
+                      {getData().sort((a, b) => a.name.localeCompare(b.name)).map(country => (
+                        <option key={country.code} value={country.name}>
+                          {country.name}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -300,7 +311,7 @@ const Checkout = () => {
                       </div>
                       <div className="text-right">
                         <p className="font-medium text-gray-900">
-                          ${(item.priceSnapshot * item.quantity).toFixed(2)}
+                          ${(getItemPrice(item) * item.quantity).toFixed(2)}
                         </p>
                       </div>
                     </div>

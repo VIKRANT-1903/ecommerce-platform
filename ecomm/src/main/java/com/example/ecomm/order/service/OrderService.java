@@ -13,6 +13,7 @@ import com.example.ecomm.order.entity.OrderStatus;
 import com.example.ecomm.order.entity.PaymentStatus;
 import com.example.ecomm.order.repository.OrderItemRepository;
 import com.example.ecomm.order.repository.OrderRepository;
+import com.example.ecomm.cart.repository.CartRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -29,6 +30,7 @@ public class OrderService {
     private final CartService cartService;
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
+    private final CartRepository cartRepository;
 
     /**
      * Create an order from the user's current cart. Total amount is calculated from cart item prices.
@@ -81,10 +83,78 @@ public class OrderService {
 
     @Transactional(readOnly = true)
     public OrderResponse getOrder(Long orderId) {
-        Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new ResourceNotFoundException("Order not found: " + orderId));
-        return toOrderResponse(order);
+        return orderRepository.findById(orderId)
+                .map(this::toOrderResponse)
+                .orElseGet(() -> {
+                    // Fallback: check if this id refers to a checked-out cart
+                    com.example.ecomm.cart.entity.Cart cart = cartRepository.findById(orderId)
+                        .orElseThrow(() -> new ResourceNotFoundException("Order not found: " + orderId));
+                    if (cart.getStatus() != com.example.ecomm.cart.entity.CartStatus.CHECKED_OUT) {
+                    throw new ResourceNotFoundException("Order not found: " + orderId);
+                    }
+                    // Map cart entity -> OrderResponse
+                    java.math.BigDecimal total = cart.getItems().stream()
+                        .map(i -> i.getPriceSnapshot().multiply(java.math.BigDecimal.valueOf(i.getQuantity())))
+                        .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
+
+                    List<OrderItemResponse> items = cart.getItems().stream()
+                        .map(i -> OrderItemResponse.builder()
+                            .orderItemId(i.getCartItemId())
+                            .productId(i.getProductId())
+                            .merchantId(i.getMerchantId())
+                            .quantity(i.getQuantity())
+                            .price(i.getPriceSnapshot())
+                            .build())
+                        .toList();
+
+                    return OrderResponse.builder()
+                        .orderId(cart.getCartId())
+                        .userId(cart.getUserId())
+                        .totalAmount(total)
+                        .orderStatus(cart.getStatus().name())
+                        .paymentStatus("PAID")
+                        .shippingAddress(null)
+                        .createdAt(cart.getUpdatedAt())
+                        .items(items)
+                        .build();
+                });
     }
+
+        @Transactional(readOnly = true)
+        public List<OrderResponse> listOrdersByUser(Integer userId) {
+        // Use checked-out carts as order history
+        List<CartResponse> carts = cartService.listCheckedOutCarts(userId);
+        return carts.stream()
+            .map(this::toOrderResponseFromCart)
+            .toList();
+        }
+
+        private OrderResponse toOrderResponseFromCart(CartResponse cart) {
+        java.math.BigDecimal total = cart.items().stream()
+            .map(i -> i.priceSnapshot().multiply(java.math.BigDecimal.valueOf(i.quantity())))
+            .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
+
+        List<OrderItemResponse> items = cart.items().stream()
+            .map(i -> OrderItemResponse.builder()
+                .orderItemId(i.cartItemId())
+                .productId(i.productId())
+                .merchantId(i.merchantId())
+                .quantity(i.quantity())
+                .price(i.priceSnapshot())
+                .build())
+            .toList();
+
+        return OrderResponse.builder()
+            .orderId(cart.cartId())
+            .userId(cart.userId())
+            .totalAmount(total)
+            .orderStatus(cart.status())
+            .paymentStatus("PAID")
+            .shippingAddress(null)
+            .createdAt(cart.updatedAt())
+            .items(items)
+            .build();
+        }
 
     private OrderResponse toOrderResponse(Order order) {
         List<OrderItemResponse> items = orderItemRepository.findByOrderOrderIdOrderByOrderItemId(order.getOrderId())

@@ -67,4 +67,24 @@ public class CartController {
         CartResponse cart = cartService.removeItem(userId, cartItemId);
         return ResponseEntity.ok(ApiResponse.success(cart));
     }
+
+    /**
+     * List checked-out carts for a user (order history fallback).
+     */
+    @GetMapping("/history")
+    public ResponseEntity<ApiResponse<java.util.List<CartResponse>>> listCheckedOut(@PathVariable Integer userId) {
+        java.util.List<CartResponse> history = cartService.listCheckedOutCarts(userId);
+        return ResponseEntity.ok(ApiResponse.success(history));
+    }
+
+    /**
+     * Fetch a specific checked-out cart by cartId for the user.
+     */
+    @GetMapping("/{cartId}")
+    public ResponseEntity<ApiResponse<CartResponse>> getCheckedOutCart(
+            @PathVariable Integer userId,
+            @PathVariable Long cartId) {
+        CartResponse cart = cartService.getCheckedOutCart(userId, cartId);
+        return ResponseEntity.ok(ApiResponse.success(cart));
+    }
 }

@@ -32,10 +32,16 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Clear token and redirect to login if unauthorized
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
+      // Only redirect to login for protected routes, not for browsing
+      const currentPath = window.location.pathname;
+      const publicPaths = ['/', '/login', '/register', '/search', '/cart'];
+      const isPublicPath = publicPaths.some(path => currentPath.startsWith(path)) ||
+                           currentPath.startsWith('/product/');
+      
+      if (!isPublicPath) {
+        // Clear token and redirect to login if unauthorized on protected route
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
         window.location.href = '/login';
       }
     }

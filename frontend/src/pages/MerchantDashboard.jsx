@@ -1,3 +1,19 @@
+// Helper to extract numeric price from offer
+function getOfferNumericPrice(offer) {
+  if (!offer) return 0;
+  const raw = offer.price;
+  let price = 0;
+  if (typeof raw === 'number') price = raw;
+  else if (raw && typeof raw === 'object') {
+    price = raw.amount ?? raw.value ?? raw.price ?? raw.cents ?? 0;
+    if (raw.cents && !raw.amount && !raw.value) price = raw.cents / 100;
+  } else if (typeof offer?.priceCents === 'number') {
+    price = offer.priceCents / 100;
+  } else if (typeof offer?.amount === 'number') {
+    price = offer.amount;
+  }
+  return isFinite(price) ? price : 0;
+}
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -95,7 +111,7 @@ const MerchantDashboard = () => {
   }
 
   const activeOffers = offers.filter(o => o.status === 'ACTIVE').length;
-  const totalRevenue = offers.reduce((sum, o) => sum + o.price, 0);
+  const totalRevenue = offers.reduce((sum, o) => sum + getOfferNumericPrice(o), 0);
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -331,7 +347,7 @@ const MerchantDashboard = () => {
                           {offer.productId.substring(0, 12)}...
                         </td>
                         <td className="py-3 text-sm font-semibold text-gray-900">
-                          ${offer.price.toFixed(2)}
+                          {`$${getOfferNumericPrice(offer).toFixed(2)}`}
                         </td>
                         <td className="py-3">
                           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${

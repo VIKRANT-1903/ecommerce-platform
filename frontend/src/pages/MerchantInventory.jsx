@@ -44,14 +44,17 @@ const MerchantInventory = () => {
       ]);
 
       const offers = offersResponse.data || [];
-      setInventoryList(inventoryResponse.data || []);
+      const inventoryItems = inventoryResponse.data || [];
+      setInventoryList(inventoryItems);
       
-      // Get unique product IDs from offers
-      const productIds = [...new Set(offers.map(offer => offer.productId))];
+      // Get unique product IDs from BOTH offers AND inventory
+      const productIdsFromOffers = offers.map(offer => offer.productId);
+      const productIdsFromInventory = inventoryItems.map(inv => inv.productId);
+      const allProductIds = [...new Set([...productIdsFromOffers, ...productIdsFromInventory])];
       
       // Fetch product details for each unique productId
-      if (productIds.length > 0) {
-        const productPromises = productIds.map(id => 
+      if (allProductIds.length > 0) {
+        const productPromises = allProductIds.map(id => 
           productService.getById(id).catch(() => null)
         );
         const productResponses = await Promise.all(productPromises);

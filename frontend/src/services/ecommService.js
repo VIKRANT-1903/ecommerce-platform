@@ -47,6 +47,12 @@ export const orderService = {
     const response = await api.get(`${ECOMM_SERVICE_URL}/orders/${orderId}`);
     return response.data;
   },
+  
+  // List orders for a user
+  getOrdersByUser: async (userId) => {
+    const response = await api.get(`${ECOMM_SERVICE_URL}/users/${userId}/orders`);
+    return response.data;
+  },
 };
 
 export const inventoryService = {

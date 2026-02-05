@@ -6,6 +6,8 @@ import com.example.ecomm.cart.dto.CartResponse;
 import com.example.ecomm.cart.dto.UpdateCartItemRequest;
 import com.example.ecomm.cart.entity.Cart;
 import com.example.ecomm.cart.entity.CartItem;
+import com.example.ecomm.client.OfferServiceClient;
+import java.math.BigDecimal;
 import com.example.ecomm.cart.entity.CartStatus;
 import com.example.ecomm.cart.repository.CartItemRepository;
 import com.example.ecomm.cart.repository.CartRepository;
@@ -25,6 +27,7 @@ public class CartService {
 
     private final CartRepository cartRepository;
     private final CartItemRepository cartItemRepository;
+    private final OfferServiceClient offerServiceClient;
 
     @Transactional
     public CartResponse getOrCreateCart(Integer userId) {
@@ -37,13 +40,20 @@ public class CartService {
     public CartResponse addItem(Integer userId, AddCartItemRequest request) {
         Cart cart = getOrCreateActiveCartEntity(userId);
         cart.setUpdatedAt(Instant.now());
+        BigDecimal price = request.priceSnapshot();
+        if (price == null) {
+            price = offerServiceClient.getOfferPrice(request.productId(), request.merchantId());
+        }
+        if (price == null) {
+            throw new ResourceNotFoundException("Price not found for product: " + request.productId());
+        }
 
         CartItem item = CartItem.builder()
                 .cart(cart)
                 .productId(request.productId())
                 .merchantId(request.merchantId())
                 .quantity(request.quantity())
-                .priceSnapshot(request.priceSnapshot())
+                .priceSnapshot(price)
                 .build();
         cart.getItems().add(item);
         cartItemRepository.save(item);
@@ -129,5 +139,33 @@ public class CartService {
                 .quantity(item.getQuantity())
                 .priceSnapshot(item.getPriceSnapshot())
                 .build();
+    }
+
+    @Transactional(readOnly = true)
+    public java.util.List<CartResponse> listCheckedOutCarts(Integer userId) {
+        return cartRepository.findAllByUserIdAndStatus(userId, CartStatus.CHECKED_OUT)
+                .stream()
+                .map(this::toCartResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public CartResponse getCheckedOutCart(Integer userId, Long cartId) {
+        Cart cart = cartRepository.findById(cartId)
+                .orElseThrow(() -> new ResourceNotFoundException("Cart not found: " + cartId));
+        if (!cart.getUserId().equals(userId) || cart.getStatus() != CartStatus.CHECKED_OUT) {
+            throw new ResourceNotFoundException("Checked-out cart not found for user: " + cartId);
+        }
+        return toCartResponse(cart);
+    }
+
+    @Transactional
+    public CartResponse checkoutCart(Integer userId) {
+        Cart cart = cartRepository.findByUserIdAndStatus(userId, CartStatus.ACTIVE)
+                .orElseThrow(() -> new ResourceNotFoundException("No active cart found for user"));
+        cart.setStatus(CartStatus.CHECKED_OUT);
+        cart.setUpdatedAt(Instant.now());
+        Cart saved = cartRepository.save(cart);
+        return toCartResponse(saved);
     }
 }

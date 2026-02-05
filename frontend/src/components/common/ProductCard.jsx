@@ -1,3 +1,19 @@
+// Helper to extract numeric price from offer
+function getOfferNumericPrice(offer) {
+  if (!offer) return 0;
+  const raw = offer.price;
+  let price = 0;
+  if (typeof raw === 'number') price = raw;
+  else if (raw && typeof raw === 'object') {
+    price = raw.amount ?? raw.value ?? raw.price ?? raw.cents ?? 0;
+    if (raw.cents && !raw.amount && !raw.value) price = raw.cents / 100;
+  } else if (typeof offer?.priceCents === 'number') {
+    price = offer.priceCents / 100;
+  } else if (typeof offer?.amount === 'number') {
+    price = offer.amount;
+  }
+  return isFinite(price) ? price : 0;
+}
 import { Link } from 'react-router-dom';
 import { ShoppingCart, Star } from 'lucide-react';
 import { useCart } from '../../context/CartContext';
@@ -17,11 +33,14 @@ const ProductCard = ({ product, offer }) => {
       productId: product.id,
       merchantId: offer.merchantId,
       quantity: 1,
-      priceSnapshot: offer.price,
+      // No priceSnapshot - backend will fetch real price
     });
   };
 
-  const placeholderImage = `https://via.placeholder.com/300x300?text=${encodeURIComponent(product.name)}`;
+  // Inline SVG fallback to avoid external placeholder DNS failures
+  const fallbackSvg = `data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'><rect width='100%' height='100%' fill='#f3f4f6'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' font-family='Arial' font-size='14' fill='#9CA3AF'>${product.name}</text></svg>`
+  )}`;
 
   return (
     <Link
@@ -30,11 +49,13 @@ const ProductCard = ({ product, offer }) => {
     >
       <div className="relative aspect-square bg-gray-100 overflow-hidden">
         <img
-          src={product.imageUrl || placeholderImage}
+          src={product.imageUrl || fallbackSvg}
           alt={product.name}
           className="w-full h-full object-cover"
           onError={(e) => {
-            e.target.src = placeholderImage;
+            // prevent infinite loop if fallback also fails
+            e.target.onerror = null;
+            e.target.src = fallbackSvg;
           }}
         />
         {offer && (
@@ -68,14 +89,15 @@ const ProductCard = ({ product, offer }) => {
           <div className="space-y-2">
             <div className="flex items-baseline gap-2">
               <span className="text-xl font-bold text-gray-900">
-                ${offer.price.toFixed(2)}
+                {`$${getOfferNumericPrice(offer).toFixed(2)}`}
               </span>
               <span className="text-sm text-gray-500 line-through">
-                ${(offer.price * 1.2).toFixed(2)}
+                {`$${(getOfferNumericPrice(offer) * 1.2).toFixed(2)}`}
               </span>
             </div>
             
-            {isAuthenticated && !isMerchant && (
+            {/* Show Add to Cart for everyone except merchants */}
+            {!isMerchant && (
               <button
                 onClick={handleAddToCart}
                 className="w-full btn-add-to-cart flex items-center justify-center gap-2"

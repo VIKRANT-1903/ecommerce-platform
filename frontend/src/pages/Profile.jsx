@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Package,
   Store,
+  ArrowRight,
 } from 'lucide-react';
 
 const Profile = () => {
@@ -287,6 +288,28 @@ const Profile = () => {
                     </div>
                   </Link>
                 </>
+              )}
+
+              {/* Become a Seller CTA for non-merchants */}
+              {!isMerchant && (
+                <div className="mt-4 p-4 bg-gradient-to-r from-amazon-orange/10 to-amber-100 rounded-lg border border-amazon-orange/20">
+                  <div className="flex items-start gap-3">
+                    <Store className="w-6 h-6 text-amazon-orange flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-medium text-gray-900">Start Selling on ShopZone</p>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Create a merchant account to list products and reach millions of customers.
+                      </p>
+                      <Link
+                        to="/register?type=merchant"
+                        className="inline-flex items-center gap-2 mt-3 text-sm font-medium text-amazon-orange hover:text-amazon-dark transition-colors"
+                      >
+                        Create Merchant Account
+                        <ArrowRight className="w-4 h-4" />
+                      </Link>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           </div>

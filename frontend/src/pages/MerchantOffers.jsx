@@ -1,3 +1,19 @@
+// Helper to extract numeric price from offer
+function getOfferNumericPrice(offer) {
+  if (!offer) return 0;
+  const raw = offer.price;
+  let price = 0;
+  if (typeof raw === 'number') price = raw;
+  else if (raw && typeof raw === 'object') {
+    price = raw.amount ?? raw.value ?? raw.price ?? raw.cents ?? 0;
+    if (raw.cents && !raw.amount && !raw.value) price = raw.cents / 100;
+  } else if (typeof offer?.priceCents === 'number') {
+    price = offer.priceCents / 100;
+  } else if (typeof offer?.amount === 'number') {
+    price = offer.amount;
+  }
+  return isFinite(price) ? price : 0;
+}
 import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { offerService, productService } from '../services/authService';
@@ -13,6 +29,7 @@ import {
   Tag,
   Package,
   Search,
+  Info,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -23,6 +40,7 @@ const MerchantOffers = () => {
   
   const [offers, setOffers] = useState([]);
   const [productDetails, setProductDetails] = useState({});
+  const [myProductIds, setMyProductIds] = useState(new Set()); // Products this merchant has created/has offers for
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(null);
@@ -37,6 +55,7 @@ const MerchantOffers = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
 
   useEffect(() => {
     fetchOffers();
@@ -45,14 +64,35 @@ const MerchantOffers = () => {
   useEffect(() => {
     if (prefilledProductId) {
       fetchProductById(prefilledProductId);
+      // If coming from product creation, this is merchant's own product
+      setMyProductIds(prev => new Set([...prev, prefilledProductId]));
     }
   }, [prefilledProductId]);
+
+  // Debounced search as user types
+  useEffect(() => {
+    if (searchQuery.trim().length < 2) {
+      setSearchResults([]);
+      setHasSearched(false);
+      return;
+    }
+
+    const debounceTimer = setTimeout(() => {
+      handleSearchProducts();
+    }, 400);
+
+    return () => clearTimeout(debounceTimer);
+  }, [searchQuery]);
 
   const fetchOffers = async () => {
     try {
       const response = await offerService.getMyOffers();
       if (response.success) {
         setOffers(response.data || []);
+        
+        // Build set of product IDs this merchant has offers for
+        const productIds = new Set((response.data || []).map(o => o.productId));
+        setMyProductIds(productIds);
         
         // Fetch product details
         for (const offer of response.data || []) {
@@ -89,7 +129,10 @@ const MerchantOffers = () => {
     try {
       const response = await productService.search({ name: searchQuery });
       if (response.success) {
+        // Show all products from search - like Amazon, any seller can add an offer
+        // The product will be linked to this merchant once they create an offer
         setSearchResults(response.data || []);
+        setHasSearched(true);
       }
     } catch (error) {
       console.error('Search failed:', error);
@@ -197,23 +240,29 @@ const MerchantOffers = () => {
           <h2 className="text-lg font-bold text-gray-900 mb-4">Create New Offer</h2>
           
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Product Search/Selection */}
+            {/* Product Selection */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Product <span className="text-red-500">*</span>
+                Select Product <span className="text-red-500">*</span>
               </label>
               
               {formData.productId && productDetails[formData.productId] ? (
-                <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                  <div className="w-12 h-12 bg-gray-100 rounded-lg overflow-hidden">
-                    <img
-                      src={productDetails[formData.productId]?.imageUrl || 'https://via.placeholder.com/48'}
-                      alt=""
-                      className="w-full h-full object-cover"
-                    />
+                <div className="flex items-center gap-4 p-3 bg-green-50 rounded-lg border border-green-200">
+                  <div className="w-12 h-12 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
+                    {productDetails[formData.productId]?.imageUrl ? (
+                      <img
+                        src={productDetails[formData.productId].imageUrl}
+                        alt=""
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <Package className="w-6 h-6 text-gray-300" />
+                      </div>
+                    )}
                   </div>
-                  <div className="flex-1">
-                    <p className="font-medium text-gray-900">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-gray-900 truncate">
                       {productDetails[formData.productId]?.name}
                     </p>
                     <p className="text-sm text-gray-500">
@@ -223,72 +272,90 @@ const MerchantOffers = () => {
                   <button
                     type="button"
                     onClick={() => setFormData(prev => ({ ...prev, productId: '' }))}
-                    className="text-gray-400 hover:text-gray-600"
+                    className="text-gray-400 hover:text-red-500 p-1"
                   >
                     ×
                   </button>
                 </div>
               ) : (
-                <div>
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none z-10" />
-                      <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleSearchProducts())}
-                        className="input-field"
-                        style={{ paddingLeft: '2.5rem' }}
-                        placeholder="Search for a product..."
-                      />
+                <div className="space-y-3">
+                  {/* Info about creating offers */}
+                  <div className="flex items-start gap-3 p-4 bg-blue-50 rounded-lg border border-blue-100">
+                    <Info className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                    <div className="text-sm">
+                      <p className="text-blue-800 font-medium">Search for a product</p>
+                      <p className="text-blue-600 mt-1">
+                        Search to find products and add your offer. Multiple sellers can offer the same product at different prices.
+                      </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleSearchProducts}
-                      disabled={searching}
-                      className="btn-secondary"
-                    >
-                      {searching ? <LoadingSpinner size="sm" /> : 'Search'}
-                    </button>
+                  </div>
+
+                  {/* Search for product */}
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none z-10" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="input-field"
+                      style={{ paddingLeft: '2.5rem' }}
+                      placeholder="Start typing product name..."
+                    />
+                    {searching && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                        <LoadingSpinner size="sm" />
+                      </div>
+                    )}
                   </div>
                   
                   {/* Search Results */}
                   {searchResults.length > 0 && (
-                    <div className="mt-2 border border-gray-200 rounded-lg max-h-60 overflow-y-auto">
+                    <div className="border border-gray-200 rounded-lg max-h-60 overflow-y-auto">
                       {searchResults.map(product => (
                         <button
                           key={product.id}
                           type="button"
                           onClick={() => handleSelectProduct(product)}
-                          className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 text-left"
+                          className="w-full flex items-center gap-3 p-3 hover:bg-amazon-orange/10 border-b border-gray-100 last:border-b-0 text-left transition-colors"
                         >
-                          <div className="w-10 h-10 bg-gray-100 rounded-lg overflow-hidden">
-                            <img
-                              src={product.imageUrl || 'https://via.placeholder.com/40'}
-                              alt=""
-                              className="w-full h-full object-cover"
-                            />
+                          <div className="w-10 h-10 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
+                            {product.imageUrl ? (
+                              <img
+                                src={product.imageUrl}
+                                alt=""
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <Package className="w-5 h-5 text-gray-300" />
+                              </div>
+                            )}
                           </div>
-                          <div>
-                            <p className="font-medium text-gray-900">{product.name}</p>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-gray-900 truncate">{product.name}</p>
                             <p className="text-sm text-gray-500">{product.category}</p>
                           </div>
                         </button>
                       ))}
                     </div>
                   )}
-                  
-                  <p className="text-sm text-gray-500 mt-2">
-                    Or enter Product ID directly:
-                  </p>
-                  <input
-                    type="text"
-                    value={formData.productId}
-                    onChange={(e) => setFormData(prev => ({ ...prev, productId: e.target.value }))}
-                    className={`input-field mt-1 ${errors.productId ? 'border-red-500' : ''}`}
-                    placeholder="Enter product ID"
-                  />
+
+                  {/* No results message */}
+                  {hasSearched && searchResults.length === 0 && searchQuery.trim().length >= 2 && !searching && (
+                    <div className="text-center py-4 bg-gray-50 rounded-lg border border-gray-200">
+                      <Package className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                      <p className="text-sm text-gray-600">No products found matching "{searchQuery}"</p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        Product not in catalog? Create it first!
+                      </p>
+                      <Link 
+                        to="/merchant/products" 
+                        className="inline-block mt-2 text-sm text-amazon-blue hover:text-amazon-orange"
+                      >
+                        Create New Product →
+                      </Link>
+                    </div>
+                  )}
                 </div>
               )}
               {errors.productId && <p className="mt-1 text-sm text-red-500">{errors.productId}</p>}
@@ -395,7 +462,7 @@ const MerchantOffers = () => {
                       </td>
                       <td className="py-4 px-6">
                         <span className="font-bold text-gray-900">
-                          ${offer.price.toFixed(2)}
+                          {`$${getOfferNumericPrice(offer).toFixed(2)}`}
                         </span>
                         <span className="text-sm text-gray-500 ml-1">
                           {offer.currency}

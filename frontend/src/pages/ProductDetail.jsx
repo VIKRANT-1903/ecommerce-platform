@@ -1,3 +1,19 @@
+// Helper to extract numeric price from offer
+function getOfferNumericPrice(offer) {
+  if (!offer) return 0;
+  const raw = offer.price;
+  let price = 0;
+  if (typeof raw === 'number') price = raw;
+  else if (raw && typeof raw === 'object') {
+    price = raw.amount ?? raw.value ?? raw.price ?? raw.cents ?? 0;
+    if (raw.cents && !raw.amount && !raw.value) price = raw.cents / 100;
+  } else if (typeof offer?.priceCents === 'number') {
+    price = offer.priceCents / 100;
+  } else if (typeof offer?.amount === 'number') {
+    price = offer.amount;
+  }
+  return isFinite(price) ? price : 0;
+}
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { productService, offerService } from '../services/authService';
@@ -56,7 +72,7 @@ const ProductDetail = () => {
             // Select the best price offer by default
             if (activeOffers.length > 0) {
               const bestOffer = activeOffers.reduce((best, current) =>
-                current.price < best.price ? current : best
+                getOfferNumericPrice(current) < getOfferNumericPrice(best) ? current : best
               );
               setSelectedOffer(bestOffer);
               
@@ -112,7 +128,7 @@ const ProductDetail = () => {
       productId: id,
       merchantId: selectedOffer.merchantId,
       quantity,
-      priceSnapshot: selectedOffer.price,
+      // No priceSnapshot - backend will fetch real price
     });
     setAddingToCart(false);
     
@@ -132,7 +148,7 @@ const ProductDetail = () => {
       productId: id,
       merchantId: selectedOffer.merchantId,
       quantity,
-      priceSnapshot: selectedOffer.price,
+      // No priceSnapshot - backend will fetch real price
     });
     setAddingToCart(false);
     
@@ -232,10 +248,10 @@ const ProductDetail = () => {
             <div className="bg-gray-50 rounded-lg p-4">
               <div className="flex items-baseline gap-2">
                 <span className="text-3xl font-bold text-gray-900">
-                  ${selectedOffer.price.toFixed(2)}
+                  {`$${getOfferNumericPrice(selectedOffer).toFixed(2)}`}
                 </span>
                 <span className="text-lg text-gray-500 line-through">
-                  ${(selectedOffer.price * 1.2).toFixed(2)}
+                  {`$${(getOfferNumericPrice(selectedOffer) * 1.2).toFixed(2)}`}
                 </span>
                 <span className="text-green-600 font-medium">
                   Save 20%
@@ -288,7 +304,7 @@ const ProductDetail = () => {
                         <Store className="w-4 h-4 text-gray-400" />
                         <span className="text-sm text-gray-600">Merchant #{offer.merchantId}</span>
                       </div>
-                      <span className="font-bold text-lg">${offer.price.toFixed(2)}</span>
+                      <span className="font-bold text-lg">{`$${getOfferNumericPrice(offer).toFixed(2)}`}</span>
                     </div>
                   </button>
                 ))}

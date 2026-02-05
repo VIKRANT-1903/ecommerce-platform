@@ -38,12 +38,14 @@ public class SecurityConfig {
             "http://127.0.0.1:3000",
             "http://127.0.0.1:5173"
         ));
-        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        configuration.setAllowedMethods(Arrays.asList(
+            "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"
+        ));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setExposedHeaders(Arrays.asList("Authorization", "Content-Type"));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
-        
+
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
@@ -51,16 +53,30 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+
         http
-                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-                .csrf(csrf -> csrf.disable())
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/auth/**").permitAll()
-                        .requestMatchers("/health").permitAll()
-                        .anyRequest().authenticated()
-                )
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+            .csrf(csrf -> csrf.disable())
+            .sessionManagement(session ->
+                session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+            )
+            .authorizeHttpRequests(auth -> auth
+
+                // 🔥 AUTH
+                .requestMatchers("/auth/**").permitAll()
+                .requestMatchers("/health").permitAll()
+
+                // 🔥 PUBLIC PRODUCT BROWSING (no /api prefix in actual endpoints)
+                .requestMatchers(org.springframework.http.HttpMethod.GET, "/products/**").permitAll()
+                .requestMatchers(org.springframework.http.HttpMethod.GET, "/products/search").permitAll()
+
+                // 🔥 PUBLIC OFFER BROWSING (for cross-service calls from ecomm)
+                .requestMatchers(org.springframework.http.HttpMethod.GET, "/offers/product/**").permitAll()
+
+                // everything else secured
+                .anyRequest().authenticated()
+            )
+            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

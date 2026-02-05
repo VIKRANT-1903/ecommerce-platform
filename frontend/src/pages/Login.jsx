@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Eye, EyeOff, Mail, Lock, Store } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, Store, ShoppingCart } from 'lucide-react';
 
 const Login = () => {
   const [formData, setFormData] = useState({
@@ -13,6 +13,12 @@ const Login = () => {
   const [errors, setErrors] = useState({});
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Get redirect URL from query params or state
+  const searchParams = new URLSearchParams(location.search);
+  const redirectTo = searchParams.get('redirect') || location.state?.from || '/';
+  const redirectMessage = location.state?.message;
 
   const validate = () => {
     const newErrors = {};
@@ -37,7 +43,7 @@ const Login = () => {
     setLoading(false);
 
     if (result.success) {
-      navigate('/');
+      navigate(redirectTo);
     }
   };
 
@@ -62,13 +68,24 @@ const Login = () => {
 
         {/* Login Card */}
         <div className="bg-white rounded-lg shadow-lg p-8">
-          <h1 className="text-2xl font-bold text-gray-900 mb-6">Sign In</h1>
+          {/* Redirect Message (e.g., from checkout) */}
+          {redirectMessage && (
+            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-3">
+              <ShoppingCart className="w-5 h-5 text-blue-600 flex-shrink-0" />
+              <p className="text-sm text-blue-800">{redirectMessage}</p>
+            </div>
+          )}
+
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Sign In</h1>
+          <p className="text-sm text-gray-500 mb-6">
+            <span className="text-red-500">*</span> indicates required fields
+          </p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Email */}
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-                Email Address
+                Email Address <span className="text-red-500">*</span>
               </label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none z-10" />
@@ -89,7 +106,7 @@ const Login = () => {
             {/* Password */}
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-                Password
+                Password <span className="text-red-500">*</span>
               </label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none z-10" />

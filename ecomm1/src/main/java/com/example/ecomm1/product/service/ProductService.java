@@ -47,8 +47,10 @@ public class ProductService {
         boolean hasName = name != null && !name.isBlank();
         boolean hasCategory = category != null && !category.isBlank();
 
+        // If no search params provided, return all products (or empty list)
         if (!hasName && !hasCategory) {
-            throw new IllegalArgumentException("At least one search parameter (name or category) is required");
+            log.debug("No search parameters provided, returning all products");
+            return productRepository.findAll().stream().map(this::toResponse).toList();
         }
 
         List<Product> results;

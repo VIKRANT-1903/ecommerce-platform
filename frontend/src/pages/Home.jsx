@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { productService, offerService } from '../services/authService';
+import { useAuth } from '../context/AuthContext';
 import ProductCard from '../components/common/ProductCard';
 import LoadingSpinner from '../components/common/LoadingSpinner';
-import { ShoppingBag, Truck, Shield, HeadphonesIcon, ArrowRight, Sparkles } from 'lucide-react';
+import { ShoppingBag, Truck, Shield, HeadphonesIcon, ArrowRight, Sparkles, User, Package, Store } from 'lucide-react';
 
 const Home = () => {
+  const { user, merchantProfile } = useAuth();
   const [featuredProducts, setFeaturedProducts] = useState([]);
   const [productOffers, setProductOffers] = useState({});
   const [loading, setLoading] = useState(true);
@@ -16,34 +18,47 @@ const Home = () => {
 
   const fetchFeaturedProducts = async () => {
     try {
-      // Try to fetch products from different categories
-      const categories = ['Electronics', 'Clothing', 'Books', 'Home', 'Sports'];
       let allProducts = [];
 
-      for (const category of categories) {
-        try {
-          const response = await productService.search({ category });
-          if (response.success && response.data) {
-            allProducts = [...allProducts, ...response.data.slice(0, 2)];
-          }
-        } catch (error) {
-          console.log(`No products in ${category}`);
+      // First, try to fetch all products with a broad search
+      try {
+        const response = await productService.search({ name: '' });
+        if (response.success && response.data) {
+          allProducts = response.data;
         }
+      } catch (error) {
+        console.log('Broad search failed, trying alternatives');
       }
 
-      // Fallback: try searching by name
+      // If that didn't work, try with single letter
       if (allProducts.length === 0) {
         try {
           const response = await productService.search({ name: 'a' });
           if (response.success && response.data) {
-            allProducts = response.data.slice(0, 8);
+            allProducts = response.data;
           }
         } catch (error) {
-          console.log('No products found');
+          console.log('Name search failed');
         }
       }
 
-      setFeaturedProducts(allProducts.slice(0, 8));
+      // If still empty, try categories
+      if (allProducts.length === 0) {
+        const categories = ['Electronics', 'Clothing', 'Books', 'Home', 'Sports'];
+        for (const category of categories) {
+          try {
+            const response = await productService.search({ category });
+            if (response.success && response.data) {
+              allProducts = [...allProducts, ...response.data];
+            }
+          } catch (error) {
+            console.log(`No products in ${category}`);
+          }
+        }
+      }
+
+      // Show up to 12 products on homepage
+      setFeaturedProducts(allProducts.slice(0, 12));
 
       // Fetch offers for each product
       const offers = {};
@@ -87,7 +102,9 @@ const Home = () => {
           <div className="max-w-2xl">
             <div className="flex items-center gap-2 mb-4">
               <Sparkles className="w-5 h-5 text-amazon-orange" />
-              <span className="text-amazon-orange font-medium">Welcome to ShopZone</span>
+              <span className="text-amazon-orange font-medium">
+                {user ? `Welcome back, ${user.name?.split(' ')[0] || 'Shopper'}!` : 'Welcome to ShopZone'}
+              </span>
             </div>
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-6">
               Discover Amazing <span className="text-amazon-orange">Deals</span> Every Day
@@ -103,12 +120,33 @@ const Home = () => {
                 Start Shopping
                 <ArrowRight className="w-5 h-5" />
               </Link>
-              <Link
-                to="/register"
-                className="btn-secondary flex items-center gap-2 text-lg px-8 py-3"
-              >
-                Join Now
-              </Link>
+              {!user ? (
+                <Link
+                  to="/register"
+                  className="btn-secondary flex items-center gap-2 text-lg px-8 py-3"
+                >
+                  Join Now
+                </Link>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <Link
+                    to="/orders"
+                    className="btn-secondary flex items-center gap-2 px-6 py-3"
+                  >
+                    <Package className="w-5 h-5" />
+                    Your Orders
+                  </Link>
+                  {!merchantProfile && (
+                    <Link
+                      to="/register?type=merchant"
+                      className="flex items-center gap-2 px-6 py-3 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-white"
+                    >
+                      <Store className="w-5 h-5" />
+                      Start Selling
+                    </Link>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>

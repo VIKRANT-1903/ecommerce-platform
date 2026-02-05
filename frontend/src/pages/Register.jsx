@@ -26,32 +26,50 @@ const Register = () => {
   const validate = () => {
     const newErrors = {};
     
+    // First name validation: only letters, 2-30 characters
+    if (!formData.firstName) {
+      newErrors.firstName = 'First name is required';
+    } else if (!/^[A-Za-z]{2,30}$/.test(formData.firstName)) {
+      newErrors.firstName = 'First name must be 2-30 letters only (no spaces or numbers)';
+    }
+    
+    // Last name validation: only letters, 2-30 characters
+    if (!formData.lastName) {
+      newErrors.lastName = 'Last name is required';
+    } else if (!/^[A-Za-z]{2,30}$/.test(formData.lastName)) {
+      newErrors.lastName = 'Last name must be 2-30 letters only (no spaces or numbers)';
+    }
+    
+    // Email validation
     if (!formData.email) {
       newErrors.email = 'Email is required';
     } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
       newErrors.email = 'Please enter a valid email';
     }
     
+    // Password validation: 8+ chars, uppercase, lowercase, number, special char
     if (!formData.password) {
       newErrors.password = 'Password is required';
-    } else if (formData.password.length < 8) {
-      newErrors.password = 'Password must be at least 8 characters';
+    } else if (!/^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/.test(formData.password)) {
+      newErrors.password = 'Password must have 8+ chars with uppercase, lowercase, number & special character (@$!%*?&)';
     }
     
     if (formData.password !== formData.confirmPassword) {
       newErrors.confirmPassword = 'Passwords do not match';
     }
     
-    if (!formData.firstName) {
-      newErrors.firstName = 'First name is required';
+    // Phone validation: 10 digits (optional)
+    if (formData.phone && !/^\d{10}$/.test(formData.phone)) {
+      newErrors.phone = 'Phone number must be exactly 10 digits';
     }
     
-    if (!formData.lastName) {
-      newErrors.lastName = 'Last name is required';
-    }
-    
-    if (userType === 'merchant' && !formData.merchantName) {
-      newErrors.merchantName = 'Store name is required';
+    // Merchant name validation: letters, numbers, spaces, and certain special chars
+    if (userType === 'merchant') {
+      if (!formData.merchantName) {
+        newErrors.merchantName = 'Store name is required';
+      } else if (!/^[A-Za-z0-9 .,&'-]{2,50}$/.test(formData.merchantName)) {
+        newErrors.merchantName = 'Store name must be 2-50 characters (letters, numbers, spaces, . , & \' -)';
+      }
     }
     
     setErrors(newErrors);
@@ -107,7 +125,10 @@ const Register = () => {
 
         {/* Register Card */}
         <div className="bg-white rounded-lg shadow-lg p-8">
-          <h1 className="text-2xl font-bold text-gray-900 mb-6">Create Account</h1>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Create Account</h1>
+          <p className="text-sm text-gray-500 mb-4">
+            <span className="text-red-500">*</span> indicates required fields
+          </p>
 
           {/* User Type Toggle */}
           <div className="flex gap-2 mb-6 p-1 bg-gray-100 rounded-lg">
@@ -142,7 +163,7 @@ const Register = () => {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label htmlFor="firstName" className="block text-sm font-medium text-gray-700 mb-1">
-                  First Name
+                  First Name <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none z-10" />
@@ -161,7 +182,7 @@ const Register = () => {
               </div>
               <div>
                 <label htmlFor="lastName" className="block text-sm font-medium text-gray-700 mb-1">
-                  Last Name
+                  Last Name <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -180,7 +201,7 @@ const Register = () => {
             {userType === 'merchant' && (
               <div>
                 <label htmlFor="merchantName" className="block text-sm font-medium text-gray-700 mb-1">
-                  Store Name
+                  Store Name <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
                   <Building className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none z-10" />
@@ -202,7 +223,7 @@ const Register = () => {
             {/* Email */}
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-                Email Address
+                Email Address <span className="text-red-500">*</span>
               </label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none z-10" />
@@ -223,7 +244,7 @@ const Register = () => {
             {/* Phone */}
             <div>
               <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-1">
-                Phone Number <span className="text-gray-400">(optional)</span>
+                Phone Number <span className="text-gray-400 text-xs">(optional)</span>
               </label>
               <div className="relative">
                 <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none z-10" />
@@ -233,17 +254,19 @@ const Register = () => {
                   name="phone"
                   value={formData.phone}
                   onChange={handleChange}
-                  className="input-field"
+                  className={`input-field ${errors.phone ? 'border-red-500' : ''}`}
                   style={{ paddingLeft: '2.5rem' }}
-                  placeholder="1234567890"
+                  placeholder="10 digit number (e.g., 9876543210)"
+                  maxLength={10}
                 />
               </div>
+              {errors.phone && <p className="mt-1 text-sm text-red-500">{errors.phone}</p>}
             </div>
 
             {/* Password */}
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-                Password
+                Password <span className="text-red-500">*</span>
               </label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none z-10" />
@@ -255,7 +278,7 @@ const Register = () => {
                   onChange={handleChange}
                   className={`input-field ${errors.password ? 'border-red-500' : ''}`}
                   style={{ paddingLeft: '2.5rem', paddingRight: '2.5rem' }}
-                  placeholder="At least 8 characters"
+                  placeholder="Min 8 chars, uppercase, lowercase, number, special"
                 />
                 <button
                   type="button"
@@ -265,13 +288,16 @@ const Register = () => {
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
+              <p className="mt-1 text-xs text-gray-500">
+                Must contain: 8+ characters, uppercase, lowercase, number, and special character (@$!%*?&)
+              </p>
               {errors.password && <p className="mt-1 text-sm text-red-500">{errors.password}</p>}
             </div>
 
             {/* Confirm Password */}
             <div>
               <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
-                Confirm Password
+                Confirm Password <span className="text-red-500">*</span>
               </label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none z-10" />
