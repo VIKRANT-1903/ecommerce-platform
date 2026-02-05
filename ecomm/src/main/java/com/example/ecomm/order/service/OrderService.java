@@ -122,11 +122,24 @@ public class OrderService {
 
         @Transactional(readOnly = true)
         public List<OrderResponse> listOrdersByUser(Integer userId) {
-        // Use checked-out carts as order history
+        // Query Order table (new checkout flow)
+        List<OrderResponse> orders = orderRepository.findByUserIdOrderByCreatedAtDesc(userId)
+            .stream()
+            .map(this::toOrderResponse)
+            .toList();
+        
+        // Also include checked-out carts (legacy flow)
         List<CartResponse> carts = cartService.listCheckedOutCarts(userId);
-        return carts.stream()
+        List<OrderResponse> cartOrders = carts.stream()
             .map(this::toOrderResponseFromCart)
             .toList();
+        
+        // Combine and sort by creation date descending
+        List<OrderResponse> allOrders = new java.util.ArrayList<>(orders);
+        allOrders.addAll(cartOrders);
+        allOrders.sort((a, b) -> b.createdAt().compareTo(a.createdAt()));
+        
+        return allOrders;
         }
 
         private OrderResponse toOrderResponseFromCart(CartResponse cart) {
