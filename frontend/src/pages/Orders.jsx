@@ -4,6 +4,7 @@ import { orderService } from '../services/ecommService';
 import { useAuth } from '../context/AuthContext';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import EmptyState from '../components/common/EmptyState';
+import Alert from '../components/common/Alert';
 import { Package, ChevronRight } from 'lucide-react';
 
 const Orders = () => {
@@ -33,7 +34,20 @@ const Orders = () => {
     }
   };
 
-  if (loading) return <div className="py-12"><LoadingSpinner /></div>;
+  if (loading) return <LoadingSpinner fullScreen />;
+
+  if (error) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <Alert 
+          type="error" 
+          title="Error Loading Orders" 
+          message={error}
+          onClose={() => setError(null)}
+        />
+      </div>
+    );
+  }
 
   if (!orders || orders.length === 0) {
     return (
