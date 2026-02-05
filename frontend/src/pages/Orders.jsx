@@ -5,10 +5,10 @@ import { useAuth } from '../context/AuthContext';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import EmptyState from '../components/common/EmptyState';
 import Alert from '../components/common/Alert';
-import { Package, ChevronRight } from 'lucide-react';
+import { Package, ShoppingCart, ChevronRight } from 'lucide-react';
 
 const Orders = () => {
-  const { user } = useAuth();
+  const { user, isMerchant } = useAuth();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -20,7 +20,14 @@ const Orders = () => {
   const fetchOrders = async () => {
     setLoading(true);
     try {
-      const resp = await orderService.getOrdersByUser(user.id);
+      let resp;
+      if (isMerchant && user?.merchantId) {
+        // Fetch merchant sales
+        resp = await orderService.getOrdersForMerchant(user.merchantId);
+      } else {
+        // Fetch customer orders
+        resp = await orderService.getOrdersByUser(user.id);
+      }
       if (resp.success) {
         setOrders(resp.data || []);
       } else {
@@ -53,11 +60,11 @@ const Orders = () => {
     return (
       <div className="container mx-auto px-4 py-12">
         <EmptyState
-          icon={Package}
-          title="No orders yet"
-          message="You haven't placed any orders yet. Start shopping to see orders here."
-          actionText="Start Shopping"
-          actionLink="/search"
+          icon={isMerchant ? ShoppingCart : Package}
+          title={isMerchant ? "No sales yet" : "No orders yet"}
+          message={isMerchant ? "You haven't received any customer orders yet. Start by adding products to your store." : "You haven't placed any orders yet. Start shopping to see orders here."}
+          actionText={isMerchant ? "Add Products" : "Start Shopping"}
+          actionLink={isMerchant ? "/merchant/products" : "/search"}
         />
       </div>
     );
@@ -66,7 +73,7 @@ const Orders = () => {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">My Orders</h1>
+        <h1 className="text-2xl font-bold">{isMerchant ? "Received Orders" : "My Orders"}</h1>
       </div>
 
       <div className="space-y-4">

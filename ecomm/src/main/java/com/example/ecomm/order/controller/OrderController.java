@@ -49,4 +49,13 @@ public class OrderController {
         List<OrderResponse> orders = orderService.listOrdersByUser(userId);
         return ResponseEntity.ok(ApiResponse.success(orders));
     }
+
+    /**
+     * Get orders (sales) for a merchant based on items they sold.
+     */
+    @GetMapping("/merchants/{merchantId}/orders")
+    public ResponseEntity<ApiResponse<List<OrderResponse>>> getMerchantOrders(@PathVariable Integer merchantId) {
+        List<OrderResponse> orders = orderService.getOrdersForMerchant(merchantId);
+        return ResponseEntity.ok(ApiResponse.success(orders));
+    }
 }

@@ -186,6 +186,27 @@ public class OrderService {
                 .build();
     }
 
+    /**
+     * Get orders (sales) for a specific merchant based on items they sold.
+     * Groups items by order to avoid duplicates.
+     */
+    @Transactional(readOnly = true)
+    public List<OrderResponse> getOrdersForMerchant(Integer merchantId) {
+        // Get all order items sold by this merchant
+        List<OrderItem> merchantItems = orderItemRepository.findByMerchantIdOrderByOrderCreatedAtDesc(merchantId);
+        
+        // Group by orderId to get unique orders
+        java.util.Map<Long, Order> ordersMap = new java.util.LinkedHashMap<>();
+        for (OrderItem item : merchantItems) {
+            ordersMap.putIfAbsent(item.getOrder().getOrderId(), item.getOrder());
+        }
+        
+        // Convert to OrderResponse
+        return ordersMap.values().stream()
+            .map(this::toOrderResponse)
+            .toList();
+    }
+
     private OrderItemResponse toOrderItemResponse(OrderItem item) {
         return OrderItemResponse.builder()
                 .orderItemId(item.getOrderItemId())
