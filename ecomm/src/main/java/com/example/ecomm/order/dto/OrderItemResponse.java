@@ -8,6 +8,7 @@ import java.math.BigDecimal;
 public record OrderItemResponse(
         Long orderItemId,
         String productId,
+        String productName,
         Integer merchantId,
         Integer quantity,
         BigDecimal price

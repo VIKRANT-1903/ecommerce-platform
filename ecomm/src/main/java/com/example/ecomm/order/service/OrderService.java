@@ -3,6 +3,7 @@ package com.example.ecomm.order.service;
 import com.example.ecomm.cart.dto.CartItemResponse;
 import com.example.ecomm.cart.dto.CartResponse;
 import com.example.ecomm.cart.service.CartService;
+import com.example.ecomm.client.ProductServiceClient;
 import com.example.ecomm.common.exception.ResourceNotFoundException;
 import com.example.ecomm.order.dto.CreateOrderRequest;
 import com.example.ecomm.order.dto.OrderItemResponse;
@@ -31,6 +32,7 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
     private final CartRepository cartRepository;
+    private final ProductServiceClient productServiceClient;
 
     /**
      * Create an order from the user's current cart. Total amount is calculated from cart item prices.
@@ -101,6 +103,7 @@ public class OrderService {
                         .map(i -> OrderItemResponse.builder()
                             .orderItemId(i.getCartItemId())
                             .productId(i.getProductId())
+                            .productName(productServiceClient.getProductName(i.getProductId()))
                             .merchantId(i.getMerchantId())
                             .quantity(i.getQuantity())
                             .price(i.getPriceSnapshot())
@@ -151,6 +154,7 @@ public class OrderService {
             .map(i -> OrderItemResponse.builder()
                 .orderItemId(i.cartItemId())
                 .productId(i.productId())
+                .productName(productServiceClient.getProductName(i.productId()))
                 .merchantId(i.merchantId())
                 .quantity(i.quantity())
                 .price(i.priceSnapshot())
@@ -211,6 +215,7 @@ public class OrderService {
         return OrderItemResponse.builder()
                 .orderItemId(item.getOrderItemId())
                 .productId(item.getProductId())
+                .productName(productServiceClient.getProductName(item.getProductId()))
                 .merchantId(item.getMerchantId())
                 .quantity(item.getQuantity())
                 .price(item.getPrice())

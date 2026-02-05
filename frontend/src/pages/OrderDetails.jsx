@@ -30,7 +30,7 @@ const OrderDetails = () => {
       if (response.success) {
         setOrder(response.data);
         
-        // Fetch product details
+        // Fetch product details for images and additional info
         for (const item of response.data.items || []) {
           try {
             const productResponse = await productService.getById(item.productId);
@@ -152,7 +152,7 @@ const OrderDetails = () => {
                         to={`/product/${item.productId}`}
                         className="font-medium text-gray-900 hover:text-amazon-orange"
                       >
-                        {product?.name || `Product ${item.productId}`}
+                        {item.productName || product?.name || `Product ${item.productId}`}
                       </Link>
                       {product?.brand && (
                         <p className="text-sm text-gray-500">{product.brand}</p>
