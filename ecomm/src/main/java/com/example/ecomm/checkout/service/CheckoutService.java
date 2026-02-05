@@ -55,7 +55,7 @@ public class CheckoutService {
         OrderResponse order = orderService.createOrder(userId, orderRequest);
         Long orderId = order.orderId();
 
-        // 3. Reserve inventory for each cart item
+        // 3. Reserve inventory for each cart item (optional - skip if inventory not found)
         List<ReserveRequest> reserved = new ArrayList<>();
         try {
             for (CartItemResponse item : cart.items()) {
@@ -64,24 +64,30 @@ public class CheckoutService {
                         .merchantId(item.merchantId())
                         .quantity(item.quantity())
                         .build();
-                ReserveResult result = inventoryService.reserve(reserveReq);
-                if (!result.success()) {
-                    log.warn("Reserve failed for {}: {}", reserveReq, result.message());
-                    compensateReserve(reserved);
-                    completeFailure(orderId, userId);
-                    // Don't clear cart on failure - let user try again
-                    emailService.sendOrderConfirmation(orderId, userId, false);
-                    return CheckoutResponse.failure(orderId, result.message());
+                try {
+                    ReserveResult result = inventoryService.reserve(reserveReq);
+                    if (!result.success()) {
+                        log.warn("Reserve failed for {}: {}", reserveReq, result.message());
+                        compensateReserve(reserved);
+                        completeFailure(orderId, userId);
+                        // Don't clear cart on failure - let user try again
+                        emailService.sendOrderConfirmation(orderId, userId, false);
+                        return CheckoutResponse.failure(orderId, result.message());
+                    }
+                    reserved.add(reserveReq);
+                } catch (ResourceNotFoundException e) {
+                    // Inventory not found - skip reservation but allow checkout to proceed
+                    // Merchants can manage inventory later
+                    log.warn("Inventory not found for product {} merchant {} - proceeding without reservation. Message: {}", 
+                            item.productId(), item.merchantId(), e.getMessage());
                 }
-                reserved.add(reserveReq);
             }
-        } catch (ResourceNotFoundException e) {
-            log.warn("Reserve failed: {}", e.getMessage());
+        } catch (Exception e) {
+            log.error("Unexpected error during inventory reservation: {}", e.getMessage(), e);
             compensateReserve(reserved);
             completeFailure(orderId, userId);
-            // Don't clear cart on failure - let user try again
             emailService.sendOrderConfirmation(orderId, userId, false);
-            return CheckoutResponse.failure(orderId, e.getMessage());
+            return CheckoutResponse.failure(orderId, "Checkout failed: " + e.getMessage());
         }
 
         // 4. Call payment gateway
@@ -97,7 +103,7 @@ public class CheckoutService {
             return CheckoutResponse.failure(orderId, "Payment failed");
         }
 
-        // 5a. Payment success: confirm inventory, mark PAID, clear cart, notify
+        // 5a. Payment success: confirm inventory (if reserved), mark PAID, clear cart, notify
         try {
             for (CartItemResponse item : cart.items()) {
                 ConfirmRequest confirmReq = ConfirmRequest.builder()
@@ -105,15 +111,18 @@ public class CheckoutService {
                         .merchantId(item.merchantId())
                         .quantity(item.quantity())
                         .build();
-                inventoryService.confirm(confirmReq);
+                try {
+                    inventoryService.confirm(confirmReq);
+                } catch (ResourceNotFoundException e) {
+                    // Inventory not found - skip confirmation (it wasn't reserved either)
+                    log.warn("Inventory not found for confirm - product {} merchant {} - skipping. Message: {}", 
+                            item.productId(), item.merchantId(), e.getMessage());
+                }
             }
         } catch (Exception e) {
-            log.error("Confirm failed for order {}: {}", orderId, e.getMessage());
-            compensateReserve(reserved);
-            completeFailure(orderId, userId);
-            // Don't clear cart on confirm failure - let user retry
-            emailService.sendOrderConfirmation(orderId, userId, false);
-            return CheckoutResponse.failure(orderId, "Inventory confirm failed: " + e.getMessage());
+            log.error("Error during inventory confirm for order {}: {}", orderId, e.getMessage());
+            // Don't fail the entire checkout - inventory issues are non-blocking
+            log.warn("Proceeding despite inventory confirm error");
         }
 
         orderService.updateOrderStatus(orderId, OrderStatus.PAID, PaymentStatus.PAID);
