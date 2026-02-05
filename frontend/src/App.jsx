@@ -74,11 +74,7 @@ function App() {
         />
         <Route
           path="register"
-          element={
-            <PublicRoute>
-              <Register />
-            </PublicRoute>
-          }
+          element={<Register />}
         />
 
         {/* Public shopping routes (guests can browse) */}
