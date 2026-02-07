@@ -13,6 +13,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.http.HttpMethod; // Import this for cleaner code
 
 import java.util.Arrays;
 import java.util.List;
@@ -66,12 +67,15 @@ public class SecurityConfig {
                 .requestMatchers("/auth/**").permitAll()
                 .requestMatchers("/health").permitAll()
 
-                // 🔥 PUBLIC PRODUCT BROWSING (no /api prefix in actual endpoints)
-                .requestMatchers(org.springframework.http.HttpMethod.GET, "/products/**").permitAll()
-                .requestMatchers(org.springframework.http.HttpMethod.GET, "/products/search").permitAll()
+                // 🔥 PUBLIC PRODUCT BROWSING
+                .requestMatchers(HttpMethod.GET, "/products").permitAll()      // Allow list all
+                .requestMatchers(HttpMethod.GET, "/products/**").permitAll()   // Allow details & search
 
-                // 🔥 PUBLIC OFFER BROWSING (for cross-service calls from ecomm)
-                .requestMatchers(org.springframework.http.HttpMethod.GET, "/offers/product/**").permitAll()
+                // 🔥 PUBLIC OFFER BROWSING
+                .requestMatchers(HttpMethod.GET, "/offers/product/**").permitAll() // Old single fetch
+                
+                // ✅ ADD THIS LINE TO FIX THE 403 ERROR
+                .requestMatchers(HttpMethod.POST, "/offers/bulk").permitAll()      // New bulk fetch
 
                 // everything else secured
                 .anyRequest().authenticated()

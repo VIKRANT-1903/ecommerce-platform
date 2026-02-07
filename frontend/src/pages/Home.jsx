@@ -4,7 +4,7 @@ import { productService, offerService } from '../services/authService';
 import { useAuth } from '../context/AuthContext';
 import ProductCard from '../components/common/ProductCard';
 import LoadingSpinner from '../components/common/LoadingSpinner';
-import { ShoppingBag, Truck, Shield, HeadphonesIcon, ArrowRight, Sparkles, User, Package, Store } from 'lucide-react';
+import { ShoppingBag, Truck, Shield, HeadphonesIcon, ArrowRight, Sparkles, Package, Store } from 'lucide-react';
 
 const Home = () => {
   const { user, merchantProfile } = useAuth();
@@ -18,75 +18,73 @@ const Home = () => {
 
   const fetchFeaturedProducts = async () => {
     try {
+      setLoading(true);
       let allProducts = [];
 
-      // First, try to fetch all products with a broad search
+      // --- [CHANGE 1] Use getAll() instead of crashing search ---
       try {
-        const response = await productService.search({ name: '' });
+        const response = await productService.getAll();
         if (response.success && response.data) {
           allProducts = response.data;
         }
       } catch (error) {
-        console.log('Broad search failed, trying alternatives');
+        console.warn('Failed to fetch all products, attempting fallback');
       }
 
-      // If that didn't work, try with single letter
+      // Fallback strategy if main list fails
       if (allProducts.length === 0) {
         try {
-          const response = await productService.search({ name: 'a' });
-          if (response.success && response.data) {
-            allProducts = response.data;
-          }
-        } catch (error) {
-          console.log('Name search failed');
+          const fallback = await productService.search({ name: 'a' });
+          if (fallback.success) allProducts = fallback.data || [];
+        } catch (e) {
+          console.error("Fallback failed", e);
         }
       }
 
-      // If still empty, try categories
-      if (allProducts.length === 0) {
-        const categories = ['Electronics', 'Clothing', 'Books', 'Home', 'Sports'];
-        for (const category of categories) {
-          try {
-            const response = await productService.search({ category });
-            if (response.success && response.data) {
-              allProducts = [...allProducts, ...response.data];
+      // Slice to 12 items for the homepage
+      const displayProducts = allProducts.slice(0, 12);
+      setFeaturedProducts(displayProducts);
+
+      // --- [CHANGE 2] Use Bulk Fetch instead of Loop ---
+      const productIds = displayProducts.map(p => p.id);
+      
+      if (productIds.length > 0) {
+        // One single call for all 12 prices
+        const offerResponse = await offerService.getBulkOffers(productIds);
+        
+        if (offerResponse.success) {
+          const bulkData = offerResponse.data || {};
+          const bestOffersMap = {};
+
+          // Process the bulk data to find the lowest price for each product
+          Object.keys(bulkData).forEach(productId => {
+            const offers = bulkData[productId];
+            if (offers && offers.length > 0) {
+              // Find the offer with the lowest price
+              const bestOffer = offers.reduce((min, cur) => 
+                cur.price < min.price ? cur : min
+              );
+              bestOffersMap[productId] = bestOffer;
             }
-          } catch (error) {
-            console.log(`No products in ${category}`);
-          }
+          });
+          
+          setProductOffers(bestOffersMap);
         }
       }
-
-      // Show up to 12 products on homepage
-      setFeaturedProducts(allProducts.slice(0, 12));
-
-      // Fetch offers for each product
-      const offers = {};
-      for (const product of allProducts) {
-        try {
-          const offerResponse = await offerService.getByProductId(product.id);
-          if (offerResponse.success && offerResponse.data?.length > 0) {
-            offers[product.id] = offerResponse.data[0];
-          }
-        } catch (error) {
-          console.log(`No offers for product ${product.id}`);
-        }
-      }
-      setProductOffers(offers);
     } catch (error) {
-      console.error('Failed to fetch products:', error);
+      console.error('Failed to fetch home data:', error);
     } finally {
       setLoading(false);
     }
   };
 
   const categories = [
-    { name: 'Electronics', icon: '📱', color: 'from-blue-500 to-blue-600' },
+    { name: 'Electronics', icon: '🎧', color: 'from-blue-500 to-blue-600' },
     { name: 'Clothing', icon: '👕', color: 'from-pink-500 to-rose-600' },
     { name: 'Books', icon: '📚', color: 'from-amber-500 to-orange-600' },
     { name: 'Home', icon: '🏠', color: 'from-green-500 to-emerald-600' },
     { name: 'Sports', icon: '⚽', color: 'from-purple-500 to-violet-600' },
-    { name: 'Toys', icon: '🎮', color: 'from-red-500 to-rose-600' },
+    { name: 'Toys', icon: '🧸', color: 'from-red-500 to-rose-600' },
   ];
 
   return (
@@ -103,7 +101,7 @@ const Home = () => {
             <div className="flex items-center gap-2 mb-4">
               <Sparkles className="w-5 h-5 text-amazon-orange" />
               <span className="text-amazon-orange font-medium">
-                {user ? `Welcome back, ${user.name?.split(' ')[0] || 'Shopper'}!` : 'Welcome to ShopZone'}
+                {user ? `Welcome back, ${user.firstName || 'Shopper'}!` : 'Welcome to ShopZone'}
               </span>
             </div>
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-6">

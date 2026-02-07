@@ -15,6 +15,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/offers")
@@ -50,6 +51,17 @@ public class OfferController {
     public ResponseEntity<ApiResponse<List<OfferResponse>>> offersByProduct(@PathVariable @NotBlank String productId) {
         log.debug("Listing offers for productId={}", productId);
         return ResponseEntity.ok(ApiResponse.ok(offerService.listOffersByProduct(productId), "Offers fetched", "/offers/product/" + productId));
+    }
+    @PostMapping("/bulk")
+    public ResponseEntity<ApiResponse<Map<String, List<OfferResponse>>>> getBulkOffers(
+            @RequestBody List<String> productIds) {
+        
+        log.info("Fetching bulk offers for {} products", productIds.size());
+        
+        // Returns Map<ProductId, List<OfferResponse>>
+        Map<String, List<OfferResponse>> offersMap = offerService.getOffersForProducts(productIds);
+        
+        return ResponseEntity.ok(ApiResponse.ok(offersMap, "Bulk offers fetched", "/offers/bulk"));
     }
 }
 

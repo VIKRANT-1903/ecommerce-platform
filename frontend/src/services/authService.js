@@ -47,18 +47,6 @@ export const merchantService = {
     const response = await api.get(`${AUTH_SERVICE_URL}/merchants/me`);
     return response.data;
   },
-
-  // Update merchant profile
-  updateProfile: async (data) => {
-    const response = await api.put(`${AUTH_SERVICE_URL}/merchants/me`, data);
-    return response.data;
-  },
-
-  // Update merchant status
-  updateStatus: async (status) => {
-    const response = await api.patch(`${AUTH_SERVICE_URL}/merchants/me/status`, { status });
-    return response.data;
-  },
 };
 
 export const productService = {
@@ -74,11 +62,20 @@ export const productService = {
     return response.data;
   },
 
-  // Search products
+  // --- [NEW] Get All Products (Safe Listing) ---
+  getAll: async () => {
+    const response = await api.get(`${AUTH_SERVICE_URL}/products`);
+    return response.data;
+  },
+
+  // --- [FIXED] Search products (Safe params) ---
   search: async (params) => {
     const queryParams = new URLSearchParams();
+    
+    // Only append if value exists (prevents sending "name=" with empty value)
     if (params.name) queryParams.append('name', params.name);
     if (params.category) queryParams.append('category', params.category);
+    
     const response = await api.get(`${AUTH_SERVICE_URL}/products/search?${queryParams.toString()}`);
     return response.data;
   },
@@ -103,9 +100,16 @@ export const offerService = {
     return response.data;
   },
 
-  // Get offers for a product
+  // Get offers for a single product (Old way, still useful for details page)
   getByProductId: async (productId) => {
     const response = await api.get(`${AUTH_SERVICE_URL}/offers/product/${productId}`);
+    return response.data;
+  },
+
+  // --- [NEW] Bulk Fetch (The Performance Fix) ---
+  getBulkOffers: async (productIds) => {
+    // Sends [ "id1", "id2" ] -> Returns { "id1": [offers], "id2": [offers] }
+    const response = await api.post(`${AUTH_SERVICE_URL}/offers/bulk`, productIds);
     return response.data;
   },
 };

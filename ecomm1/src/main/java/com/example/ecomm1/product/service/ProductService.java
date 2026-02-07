@@ -42,12 +42,21 @@ public class ProductService {
         return toResponse(product);
     }
 
+    // --- ADD THIS NEW METHOD ---
+    public List<ProductResponse> getAllProducts() {
+        log.debug("Fetching all products");
+        return productRepository.findAll()
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
     public List<ProductResponse> searchProducts(String name, String category) {
         log.debug("Searching products name={} category={}", name, category);
         boolean hasName = name != null && !name.isBlank();
         boolean hasCategory = category != null && !category.isBlank();
 
-        // If no search params provided, return all products (or empty list)
+        // If no search params provided, return all products
         if (!hasName && !hasCategory) {
             log.debug("No search parameters provided, returning all products");
             return productRepository.findAll().stream().map(this::toResponse).toList();
@@ -76,4 +85,3 @@ public class ProductService {
                 .build();
     }
 }
-

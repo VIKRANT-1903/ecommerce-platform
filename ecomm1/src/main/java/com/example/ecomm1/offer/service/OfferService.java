@@ -19,6 +19,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -104,6 +106,22 @@ public class OfferService {
                 .toList();
     }
 
+    // --- NEW BULK METHOD ---
+    public Map<String, List<OfferResponse>> getOffersForProducts(List<String> productIds) {
+        // 1. Fetch all active offers for these products in one query
+        // Note: Ensure your OfferRepository has findByProductIdInAndStatus defined
+        List<Offer> allOffers = offerRepository.findByProductIdInAndStatus(productIds, OfferStatus.ACTIVE);
+
+        // 2. Convert entities to DTOs
+        List<OfferResponse> responseList = allOffers.stream()
+                .map(this::toResponse)
+                .toList();
+
+        // 3. Group by Product ID
+        return responseList.stream()
+                .collect(Collectors.groupingBy(OfferResponse::getProductId));
+    }
+
     private OfferResponse toResponse(Offer offer) {
         return OfferResponse.builder()
                 .offerId(offer.getOfferId())
@@ -117,4 +135,3 @@ public class OfferService {
                 .build();
     }
 }
-

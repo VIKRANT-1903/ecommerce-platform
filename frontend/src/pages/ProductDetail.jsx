@@ -14,6 +14,7 @@ function getOfferNumericPrice(offer) {
   }
   return isFinite(price) ? price : 0;
 }
+
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { productService, offerService } from '../services/authService';
@@ -128,7 +129,6 @@ const ProductDetail = () => {
       productId: id,
       merchantId: selectedOffer.merchantId,
       quantity,
-      // No priceSnapshot - backend will fetch real price
     });
     setAddingToCart(false);
     
@@ -148,13 +148,27 @@ const ProductDetail = () => {
       productId: id,
       merchantId: selectedOffer.merchantId,
       quantity,
-      // No priceSnapshot - backend will fetch real price
     });
     setAddingToCart(false);
     
     if (result.success) {
       navigate('/checkout');
     }
+  };
+
+  // --- FIXED: Local SVG Fallback (No Internet Required) ---
+  const getFallbackImage = (text) => {
+    // This creates a simple gray square with the product name as a Data URI
+    // It works offline and cannot fail, preventing loops.
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="600" height="600" viewBox="0 0 600 600">
+        <rect width="600" height="600" fill="#f3f4f6"/>
+        <text x="50%" y="50%" font-family="sans-serif" font-size="24" fill="#9ca3af" text-anchor="middle" dominant-baseline="middle">
+          ${text}
+        </text>
+      </svg>
+    `;
+    return `data:image/svg+xml;base64,${btoa(svg)}`;
   };
 
   if (loading) {
@@ -180,7 +194,6 @@ const ProductDetail = () => {
     );
   }
 
-  const placeholderImage = `https://via.placeholder.com/600x600?text=${encodeURIComponent(product.name)}`;
   const availableQty = inventory?.availableQty || 0;
   const isInStock = availableQty > 0;
 
@@ -201,12 +214,16 @@ const ProductDetail = () => {
         {/* Product Image */}
         <div className="bg-white rounded-lg p-4">
           <div className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
+            {/* --- FIXED: Image Loop Error Handler --- */}
             <img
-              src={product.imageUrl || placeholderImage}
+              src={product.imageUrl || getFallbackImage(product.name)}
               alt={product.name}
               className="w-full h-full object-cover"
               onError={(e) => {
-                e.target.src = placeholderImage;
+                // 1. STOP THE LOOP: Remove the event listener immediately
+                e.target.onerror = null;
+                // 2. USE LOCAL SVG: Prevents network errors
+                e.target.src = getFallbackImage(product.name || 'Product');
               }}
             />
           </div>

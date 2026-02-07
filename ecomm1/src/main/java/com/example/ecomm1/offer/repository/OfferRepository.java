@@ -10,9 +10,18 @@ import java.util.Optional;
 
 @Repository
 public interface OfferRepository extends JpaRepository<Offer, Long> {
+    
     List<Offer> findByProductId(String productId);
+    
     List<Offer> findByMerchantMerchantId(Long merchantId);
+    
     List<Offer> findByStatus(OfferStatus status);
+    
     List<Offer> findByProductIdAndStatus(String productId, OfferStatus status);
+    
     Optional<Offer> findByOfferIdAndMerchant_User_Id(Long offerId, Long userId);
+
+    // --- ADD THIS METHOD FOR BULK FETCH ---
+    // This generates a query like: SELECT * FROM offer WHERE product_id IN (...) AND status = 'ACTIVE'
+    List<Offer> findByProductIdInAndStatus(List<String> productIds, OfferStatus status);
 }
