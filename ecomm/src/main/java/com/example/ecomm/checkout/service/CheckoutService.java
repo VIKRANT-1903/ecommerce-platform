@@ -78,7 +78,7 @@ public class CheckoutService {
                 } catch (ResourceNotFoundException e) {
                     // Inventory not found - skip reservation but allow checkout to proceed
                     // Merchants can manage inventory later
-                    log.warn("Inventory not found for product {} merchant {} - proceeding without reservation. Message: {}", 
+                    log.warn("Inventory not found for product {} merchant {} - proceeding without reservation. Message: {}",
                             item.productId(), item.merchantId(), e.getMessage());
                 }
             }
@@ -115,7 +115,7 @@ public class CheckoutService {
                     inventoryService.confirm(confirmReq);
                 } catch (ResourceNotFoundException e) {
                     // Inventory not found - skip confirmation (it wasn't reserved either)
-                    log.warn("Inventory not found for confirm - product {} merchant {} - skipping. Message: {}", 
+                    log.warn("Inventory not found for confirm - product {} merchant {} - skipping. Message: {}",
                             item.productId(), item.merchantId(), e.getMessage());
                 }
             }

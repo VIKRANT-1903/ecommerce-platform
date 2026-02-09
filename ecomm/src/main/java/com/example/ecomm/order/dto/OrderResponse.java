@@ -8,8 +8,8 @@ import java.util.List;
 
 @Builder
 public record OrderResponse(
-        Long orderId,            // Global ID (e.g., 505) - Internal use
-        Integer userOrderNumber, // Friendly ID (e.g., 5) - Display use <--- NEW FIELD
+        Long orderId,            // Database ID (57)
+        Integer userOrderNumber, // Friendly ID (1) <-- ADD THIS
         Integer userId,
         BigDecimal totalAmount,
         String orderStatus,

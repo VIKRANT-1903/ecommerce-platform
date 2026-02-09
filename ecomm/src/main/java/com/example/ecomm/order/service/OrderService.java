@@ -22,8 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.Map;
-import java.util.LinkedHashMap;
+import java.util.ArrayList;
 
 @Service
 @RequiredArgsConstructor
@@ -55,10 +54,16 @@ public class OrderService {
                 .shippingAddress(request.shippingAddress())
                 .build();
 
-        // 1. SAVE FIRST: The DB assigns the unique 'orderId' here (e.g., 501).
-        // This 'locks' the sequence position for this order.
+        // 1. SAVE: Generates the global ID (e.g., 57)
         order = orderRepository.save(order);
 
+        // 2. CALCULATE FRIENDLY NUMBER (e.g., 1)
+        long friendlyCount = orderRepository.countByUserIdAndOrderIdLessThanEqual(userId, order.getOrderId());
+
+        // 3. ATTACH TO OBJECT: Now the Email Service can read 'order.getUserOrderNumber()'
+        order.setUserOrderNumber((int) friendlyCount);
+
+        List<OrderItem> savedItems = new ArrayList<>();
         for (CartItemResponse cartItem : cart.items()) {
             OrderItem orderItem = OrderItem.builder()
                     .order(order)
@@ -68,11 +73,15 @@ public class OrderService {
                     .price(cartItem.priceSnapshot())
                     .build();
             orderItemRepository.save(orderItem);
+            savedItems.add(orderItem);
         }
+        order.setItems(savedItems);
 
-        log.info("Created order {} for user {}", order.getOrderId(), userId);
+        log.info("Created order #{} (Global ID: {}) for user {}", friendlyCount, order.getOrderId(), userId);
 
-        // 2. CALCULATE NUMBER: Now that it's saved, we can count it.
+        // The 'order' object now has the correct number inside it.
+        // When your EmailListener / EmailService picks this up, it will see the correct number.
+
         return toOrderResponse(order);
     }
 
@@ -91,14 +100,12 @@ public class OrderService {
         return orderRepository.findById(orderId)
                 .map(this::toOrderResponse)
                 .orElseGet(() -> {
-                    // Fallback for legacy checked-out carts
+                    // Fallback for legacy carts
                     com.example.ecomm.cart.entity.Cart cart = cartRepository.findById(orderId)
                             .orElseThrow(() -> new ResourceNotFoundException("Order not found: " + orderId));
-
                     if (cart.getStatus() != com.example.ecomm.cart.entity.CartStatus.CHECKED_OUT) {
                         throw new ResourceNotFoundException("Order not found: " + orderId);
                     }
-
                     return toOrderResponseFromCart(toCartResponse(cart));
                 });
     }
@@ -110,7 +117,6 @@ public class OrderService {
                 .map(this::toOrderResponse)
                 .toList();
 
-        // Include legacy cart orders if any
         List<CartResponse> carts = cartService.listCheckedOutCarts(userId);
         List<OrderResponse> cartOrders = carts.stream()
                 .map(this::toOrderResponseFromCart)
@@ -123,36 +129,7 @@ public class OrderService {
         return allOrders;
     }
 
-    // --- MAPPERS ---
-
-    private OrderResponse toOrderResponse(Order order) {
-        List<OrderItemResponse> items = orderItemRepository.findByOrderOrderIdOrderByOrderItemId(order.getOrderId())
-                .stream()
-                .map(this::toOrderItemResponse)
-                .toList();
-
-        // --- THE MAGIC: Calculate Friendly Number on the fly ---
-        long friendlyNumber = orderRepository.countByUserIdAndOrderIdLessThanEqual(
-                order.getUserId(),
-                order.getOrderId()
-        );
-        // ------------------------------------------------------
-
-        return OrderResponse.builder()
-                .orderId(order.getOrderId())
-                .userOrderNumber((int) friendlyNumber) // Map the calculated number
-                .userId(order.getUserId())
-                .totalAmount(order.getTotalAmount())
-                .orderStatus(order.getOrderStatus().name())
-                .paymentStatus(order.getPaymentStatus().name())
-                .shippingAddress(order.getShippingAddress())
-                .createdAt(order.getCreatedAt())
-                .items(items)
-                .build();
-    }
-
     private OrderResponse toOrderResponseFromCart(CartResponse cart) {
-        // ... (standard logic for legacy carts) ...
         BigDecimal total = cart.items().stream()
                 .map(i -> i.priceSnapshot().multiply(BigDecimal.valueOf(i.quantity())))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -170,7 +147,6 @@ public class OrderService {
 
         return OrderResponse.builder()
                 .orderId(cart.cartId())
-                .userOrderNumber(null) // Legacy carts don't get a friendly number
                 .userId(cart.userId())
                 .totalAmount(total)
                 .orderStatus(cart.status())
@@ -181,18 +157,47 @@ public class OrderService {
                 .build();
     }
 
-    // Helper to bridge Cart entity to CartResponse
     private CartResponse toCartResponse(com.example.ecomm.cart.entity.Cart cart) {
         return cartService.getCart(cart.getUserId());
+    }
+
+    private OrderResponse toOrderResponse(Order order) {
+        List<OrderItemResponse> items = orderItemRepository.findByOrderOrderIdOrderByOrderItemId(order.getOrderId())
+                .stream()
+                .map(this::toOrderItemResponse)
+                .toList();
+
+        // Calculate friendly number if it's missing (e.g. when viewing history)
+        if (order.getUserOrderNumber() == null) {
+            long count = orderRepository.countByUserIdAndOrderIdLessThanEqual(
+                    order.getUserId(),
+                    order.getOrderId()
+            );
+            order.setUserOrderNumber((int) count);
+        }
+
+        return OrderResponse.builder()
+                .orderId(order.getOrderId())
+                .userOrderNumber(order.getUserOrderNumber()) // Map new field
+                .userId(order.getUserId())
+                .totalAmount(order.getTotalAmount())
+                .orderStatus(order.getOrderStatus().name())
+                .paymentStatus(order.getPaymentStatus().name())
+                .shippingAddress(order.getShippingAddress())
+                .createdAt(order.getCreatedAt())
+                .items(items)
+                .build();
     }
 
     @Transactional(readOnly = true)
     public List<OrderResponse> getOrdersForMerchant(Integer merchantId) {
         List<OrderItem> merchantItems = orderItemRepository.findByMerchantIdOrderByOrderCreatedAtDesc(merchantId);
-        Map<Long, Order> ordersMap = new LinkedHashMap<>();
+
+        java.util.Map<Long, Order> ordersMap = new java.util.LinkedHashMap<>();
         for (OrderItem item : merchantItems) {
             ordersMap.putIfAbsent(item.getOrder().getOrderId(), item.getOrder());
         }
+
         return ordersMap.values().stream()
                 .map(this::toOrderResponse)
                 .toList();
