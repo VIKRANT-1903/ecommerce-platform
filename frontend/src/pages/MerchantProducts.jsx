@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { productService, offerService } from '../services/authService';
+import { productService, offerService } from '../services/authService'; // Check your path to authService
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import Alert from '../components/common/Alert';
-import EmptyState from '../components/common/EmptyState';
 import {
   Package,
   Plus,
@@ -23,11 +22,11 @@ import toast from 'react-hot-toast';
 const MerchantProducts = () => {
   // View mode: 'list' or 'add'
   const [viewMode, setViewMode] = useState('list');
-  
+
   // Products list state
   const [products, setProducts] = useState([]);
   const [loadingProducts, setLoadingProducts] = useState(true);
-  
+
   // Add product form state
   const [formData, setFormData] = useState({
     name: '',
@@ -63,41 +62,47 @@ const MerchantProducts = () => {
     fetchMyProducts();
   }, []);
 
+  // --- OPTIMIZED FETCH FUNCTION (Fixes the Flooding Issue) ---
   const fetchMyProducts = async () => {
     setLoadingProducts(true);
     try {
-      // Get all offers for this merchant
-      const offersResponse = await offerService.getMyOffers();
-      if (offersResponse.success && offersResponse.data) {
-        // Get unique product IDs from offers
-        const productIds = [...new Set(offersResponse.data.map(offer => offer.productId))];
-        
-        // Fetch product details for each unique product
-        const productPromises = productIds.map(async (productId) => {
-          try {
-            const productResponse = await productService.getById(productId);
-            if (productResponse.success) {
-              // Find offers for this product
-              const productOffers = offersResponse.data.filter(o => o.productId === productId);
-              return {
-                ...productResponse.data,
-                offers: productOffers,
-                lowestPrice: Math.min(...productOffers.map(o => o.price)),
-                totalOffers: productOffers.length,
-              };
-            }
-            return null;
-          } catch (error) {
-            console.log(`Failed to fetch product ${productId}`);
-            return null;
-          }
-        });
+      // 1. Parallel Fetch: Get ALL Offers AND ALL Products at the same time
+      // This reduces N+1 calls to just 2 calls.
+      const [offersResponse, productsResponse] = await Promise.all([
+        offerService.getMyOffers(),
+        productService.getAll() // Uses the optimized endpoint we built earlier
+      ]);
 
-        const fetchedProducts = (await Promise.all(productPromises)).filter(p => p !== null);
-        setProducts(fetchedProducts);
+      if (offersResponse.success && offersResponse.data && productsResponse.success && productsResponse.data) {
+        const myOffers = offersResponse.data;
+        const allProducts = productsResponse.data;
+
+        // 2. Identify which product IDs belong to this merchant
+        const myProductIds = new Set(myOffers.map(offer => offer.productId));
+
+        // 3. Filter the full product list locally (Instant)
+        const myProducts = allProducts
+          .filter(product => myProductIds.has(product.id))
+          .map(product => {
+            // Attach offer details to the product object for display
+            const productOffers = myOffers.filter(o => o.productId === product.id);
+
+            // Calculate lowest price safely
+            const prices = productOffers.map(o => o.price).filter(p => typeof p === 'number');
+            const lowestPrice = prices.length > 0 ? Math.min(...prices) : 0;
+
+            return {
+              ...product,
+              offers: productOffers,
+              lowestPrice: lowestPrice,
+              totalOffers: productOffers.length,
+            };
+          });
+
+        setProducts(myProducts);
       }
     } catch (error) {
-      console.error('Failed to fetch products:', error);
+      console.error('Failed to fetch merchant products:', error);
       toast.error('Failed to load products');
     } finally {
       setLoadingProducts(false);
@@ -200,7 +205,7 @@ const MerchantProducts = () => {
           <p className="text-gray-500 mb-6 max-w-md mx-auto">
             Products appear here after you create at least one offer for them.
           </p>
-          
+
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <button
               onClick={() => setViewMode('add')}
@@ -217,7 +222,7 @@ const MerchantProducts = () => {
               Create Offer for Existing Product
             </Link>
           </div>
-          
+
           <p className="text-sm text-gray-400 mt-6">
             Already created a product? Go to <Link to="/merchant/offers" className="text-amazon-blue hover:underline">My Offers</Link> to search and add pricing.
           </p>
@@ -255,13 +260,13 @@ const MerchantProducts = () => {
                   {product.totalOffers} offer{product.totalOffers !== 1 ? 's' : ''}
                 </span>
               </div>
-              
+
               {product.brand && (
                 <p className="text-xs text-gray-500 uppercase tracking-wide">{product.brand}</p>
               )}
-              
+
               <h3 className="font-medium text-gray-900 line-clamp-2 mt-1">{product.name}</h3>
-              
+
               <div className="mt-3 flex items-center justify-between">
                 <div>
                   <p className="text-xs text-gray-500">Starting from</p>
@@ -317,7 +322,7 @@ const MerchantProducts = () => {
               Add Another Product
             </button>
           </div>
-          
+
           {/* Important note about finding the product later */}
           <div className="mt-6 bg-amber-50 border border-amber-200 rounded-lg p-4">
             <p className="text-sm text-amber-800">
@@ -328,7 +333,7 @@ const MerchantProducts = () => {
               <li>Product ID: <code className="bg-amber-100 px-1 rounded">{createdProduct.id}</code></li>
             </ul>
           </div>
-          
+
           <button
             onClick={handleBackToList}
             className="mt-4 text-amazon-blue hover:text-amazon-orange text-sm flex items-center gap-1"
@@ -477,7 +482,7 @@ const MerchantProducts = () => {
         <div className="lg:col-span-1">
           <div className="bg-white rounded-lg shadow-sm p-6 sticky top-24">
             <h3 className="font-semibold text-gray-900 mb-4">Preview</h3>
-            
+
             <div className="border border-gray-200 rounded-lg overflow-hidden">
               <div className="aspect-square bg-gray-100 flex items-center justify-center">
                 {formData.imageUrl ? (
@@ -573,7 +578,7 @@ const MerchantProducts = () => {
       {viewMode === 'list' && products.length > 0 && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
           <p className="text-sm text-blue-800">
-            <strong>Note:</strong> Products appear here after you create at least one offer for them. 
+            <strong>Note:</strong> Products appear here after you create at least one offer for them.
             To sell a product, you need both a product and a price offer.
           </p>
         </div>

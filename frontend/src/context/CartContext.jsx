@@ -43,76 +43,110 @@ export const useCart = () => {
 };
 
 export const CartProvider = ({ children }) => {
-  const { user, isAuthenticated } = useAuth();
+  // [CHANGE 1] Get isMerchant from Auth
+  const { user, isAuthenticated, isMerchant } = useAuth();
+
   const [cart, setCart] = useState(null);
   const [loading, setLoading] = useState(false);
   const [productDetails, setProductDetails] = useState({});
-  const [offerPrices, setOfferPrices] = useState({}); // Store real prices from API
+  const [offerPrices, setOfferPrices] = useState({});
   const [hasSyncedGuestCart, setHasSyncedGuestCart] = useState(false);
 
-  // Fetch offer prices for cart items (source of truth for prices)
+  // [CHANGE 2] Optimized Bulk Fetch for Prices (1 Call instead of N loops)
   const fetchOfferPrices = useCallback(async (items) => {
     if (!items?.length) return;
-    
-    const prices = {};
-    for (const item of items) {
-      const key = `${item.productId}_${item.merchantId}`;
-      if (offerPrices[key]) continue; // Already have price
-      
-      try {
-        const response = await offerService.getByProductId(item.productId);
-        if (response.success && response.data?.length > 0) {
-          // Find the offer for this specific merchant
-          const offer = response.data.find(o => o.merchantId === item.merchantId) || response.data[0];
 
-          // Normalize price to a numeric value (offer.price may be object)
-          const raw = offer?.price;
-          let numeric = 0;
-          if (typeof raw === 'number') numeric = raw;
-          else if (raw && typeof raw === 'object') {
-            numeric = raw.amount ?? raw.value ?? raw.price ?? raw.cents ?? 0;
-            if (raw.cents && !raw.amount && !raw.value) numeric = raw.cents / 100;
-          } else if (typeof offer?.priceCents === 'number') {
-            numeric = offer.priceCents / 100;
-          } else if (typeof offer?.amount === 'number') {
-            numeric = offer.amount;
+    // Filter out items we already have prices for
+    const itemsNeedingPrices = items.filter(
+      item => !offerPrices[`${item.productId}_${item.merchantId}`]
+    );
+
+    if (itemsNeedingPrices.length === 0) return;
+
+    // Get unique Product IDs
+    const productIds = [...new Set(itemsNeedingPrices.map(item => item.productId))];
+    const newPrices = {};
+
+    try {
+      // ONE single API call for all products
+      const response = await offerService.getBulkOffers(productIds);
+
+      if (response.success && response.data) {
+        const bulkData = response.data; // { productId: [offers] }
+
+        itemsNeedingPrices.forEach(item => {
+          const key = `${item.productId}_${item.merchantId}`;
+          const productOffers = bulkData[item.productId];
+
+          if (productOffers && Array.isArray(productOffers)) {
+            // Find the offer for this specific merchant
+            const offer = productOffers.find(o => o.merchantId === item.merchantId) || productOffers[0];
+
+            if (offer) {
+              // Normalize price
+              const raw = offer.price;
+              let numeric = 0;
+              if (typeof raw === 'number') numeric = raw;
+              else if (raw && typeof raw === 'object') {
+                numeric = raw.amount ?? raw.value ?? raw.price ?? raw.cents ?? 0;
+                if (raw.cents && !raw.amount && !raw.value) numeric = raw.cents / 100;
+              } else if (typeof offer?.priceCents === 'number') {
+                numeric = offer.priceCents / 100;
+              } else if (typeof offer?.amount === 'number') {
+                numeric = offer.amount;
+              }
+              newPrices[key] = isFinite(numeric) ? numeric : 0;
+            }
           }
-          prices[key] = isFinite(numeric) ? numeric : 0;
-        }
-      } catch (error) {
-        console.error(`Failed to fetch price for ${item.productId}:`, error);
+        });
+
+        setOfferPrices(prev => ({ ...prev, ...newPrices }));
       }
+    } catch (error) {
+      console.error('Failed to fetch bulk prices:', error);
     }
-    setOfferPrices(prev => ({ ...prev, ...prices }));
   }, [offerPrices]);
 
-  // Fetch product details for cart items
+  // [CHANGE 3] Parallel Fetch for Products (Faster than sequential loop)
   const fetchProductDetails = useCallback(async (items) => {
     if (!items?.length) return;
-    
+
     const uniqueProductIds = [...new Set(items.map(item => item.productId))];
-    const details = {};
-    
-    for (const productId of uniqueProductIds) {
+    // Filter ones we don't have
+    const idsToFetch = uniqueProductIds.filter(id => !productDetails[id]);
+
+    if (idsToFetch.length === 0) {
+      // Just check prices if we already have products
+      await fetchOfferPrices(items);
+      return;
+    }
+
+    const newDetails = {};
+
+    // Execute all requests in parallel
+    await Promise.all(idsToFetch.map(async (productId) => {
       try {
         const productResponse = await productService.getById(productId);
         if (productResponse.success) {
-          details[productId] = productResponse.data;
+          newDetails[productId] = productResponse.data;
         }
       } catch (error) {
         console.error(`Failed to fetch product ${productId}:`, error);
       }
-    }
-    setProductDetails(prev => ({ ...prev, ...details }));
-    
+    }));
+
+    setProductDetails(prev => ({ ...prev, ...newDetails }));
+
     // Also fetch prices
     await fetchOfferPrices(items);
-  }, [fetchOfferPrices]);
+  }, [productDetails, fetchOfferPrices]);
 
-  // Fetch server cart for authenticated users
+  // Fetch server cart
   const fetchCart = useCallback(async () => {
+    // [CHANGE 4] Guard: Merchants don't need carts
+    if (isMerchant) return;
     if (!user?.id) return;
-    
+
     setLoading(true);
     try {
       const response = await cartService.getCart(user.id);
@@ -125,12 +159,18 @@ export const CartProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  }, [user?.id, fetchProductDetails]);
+  }, [user?.id, fetchProductDetails, isMerchant]);
 
-  // Sync guest cart to server cart when user logs in
+  // Sync guest cart
   const syncGuestCartToServer = useCallback(async () => {
+    // [CHANGE 5] Guard: Merchants don't sync carts
+    if (isMerchant) {
+        setHasSyncedGuestCart(true);
+        clearGuestCartStorage(); // Optional: clear garbage data
+        return;
+    }
     if (!user?.id) return;
-    
+
     const guestCart = getGuestCart();
     if (guestCart.items.length === 0) {
       setHasSyncedGuestCart(true);
@@ -139,26 +179,21 @@ export const CartProvider = ({ children }) => {
 
     setLoading(true);
     try {
-      // Add each guest cart item to server cart
-      // Backend will fetch the real price from offer service
       for (const item of guestCart.items) {
         try {
           await cartService.addItem(user.id, {
             productId: item.productId,
             merchantId: item.merchantId,
             quantity: item.quantity,
-            // Don't send priceSnapshot - backend will fetch real price
           });
         } catch (error) {
           console.error('Failed to sync item:', item, error);
         }
       }
-      
-      // Clear guest cart after sync
+
       clearGuestCartStorage();
       toast.success('Your cart items have been saved!');
-      
-      // Fetch updated server cart
+
       await fetchCart();
       setHasSyncedGuestCart(true);
     } catch (error) {
@@ -167,31 +202,35 @@ export const CartProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [user?.id, fetchCart, isMerchant]);
 
-  // Initialize cart based on auth state
+  // Initialize cart
   useEffect(() => {
+    // [CHANGE 6] CRITICAL: Stop everything if Merchant
+    if (isMerchant) return;
+
     if (isAuthenticated && user?.id) {
-      // User is logged in - first sync guest cart, then fetch server cart
       if (!hasSyncedGuestCart) {
         syncGuestCartToServer();
       } else {
-        // Already synced, just fetch the server cart
         fetchCart();
       }
     } else {
-      // Guest user - load from localStorage
       const guestCart = getGuestCart();
       setCart(guestCart);
       fetchProductDetails(guestCart.items);
       setHasSyncedGuestCart(false);
     }
-  }, [isAuthenticated, user?.id, hasSyncedGuestCart]);
+  }, [isAuthenticated, user?.id, hasSyncedGuestCart, isMerchant, fetchCart, syncGuestCartToServer, fetchProductDetails]);
 
-  // Add item to cart
+  // Actions
   const addToCart = async (item) => {
+    if (isMerchant) {
+        toast.error("Merchants cannot shop from their own account.");
+        return { success: false };
+    }
+
     if (isAuthenticated && user?.id) {
-      // Authenticated user - use server cart
       try {
         const response = await cartService.addItem(user.id, item);
         if (response.success) {
@@ -206,19 +245,14 @@ export const CartProvider = ({ children }) => {
         return { success: false, message };
       }
     } else {
-      // Guest user - use localStorage cart
       const guestCart = getGuestCart();
-      
-      // Check if item already exists
       const existingIndex = guestCart.items.findIndex(
         i => i.productId === item.productId && i.merchantId === item.merchantId
       );
-      
+
       if (existingIndex >= 0) {
-        // Update quantity
         guestCart.items[existingIndex].quantity += item.quantity;
       } else {
-        // Add new item with a temporary ID - NO price stored (fetched from API)
         guestCart.items.push({
           productId: item.productId,
           merchantId: item.merchantId,
@@ -226,7 +260,7 @@ export const CartProvider = ({ children }) => {
           cartItemId: `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         });
       }
-      
+
       saveGuestCart(guestCart);
       setCart(guestCart);
       await fetchProductDetails(guestCart.items);
@@ -235,10 +269,8 @@ export const CartProvider = ({ children }) => {
     }
   };
 
-  // Update cart item quantity
   const updateCartItem = async (cartItemId, quantity) => {
     if (isAuthenticated && user?.id) {
-      // Authenticated user - use server cart
       try {
         const response = await cartService.updateItem(user.id, cartItemId, quantity);
         if (response.success) {
@@ -253,10 +285,9 @@ export const CartProvider = ({ children }) => {
         return { success: false, message };
       }
     } else {
-      // Guest user - update localStorage cart
       const guestCart = getGuestCart();
       const itemIndex = guestCart.items.findIndex(i => i.cartItemId === cartItemId);
-      
+
       if (itemIndex >= 0) {
         if (quantity <= 0) {
           guestCart.items.splice(itemIndex, 1);
@@ -272,10 +303,8 @@ export const CartProvider = ({ children }) => {
     }
   };
 
-  // Remove item from cart
   const removeFromCart = async (cartItemId) => {
     if (isAuthenticated && user?.id) {
-      // Authenticated user - use server cart
       try {
         const response = await cartService.removeItem(user.id, cartItemId);
         if (response.success) {
@@ -290,7 +319,6 @@ export const CartProvider = ({ children }) => {
         return { success: false, message };
       }
     } else {
-      // Guest user - remove from localStorage cart
       const guestCart = getGuestCart();
       guestCart.items = guestCart.items.filter(i => i.cartItemId !== cartItemId);
       saveGuestCart(guestCart);
@@ -300,13 +328,11 @@ export const CartProvider = ({ children }) => {
     }
   };
 
-  // Checkout (requires authentication)
   const checkout = async (shippingAddress) => {
     if (!isAuthenticated || !user?.id) {
       toast.error('Please login to checkout');
       return { success: false, requiresAuth: true };
     }
-
     try {
       const response = await checkoutService.checkout(user.id, shippingAddress);
       if (response.success && response.data?.success) {
@@ -324,7 +350,6 @@ export const CartProvider = ({ children }) => {
     }
   };
 
-  // Clear cart
   const clearCart = () => {
     if (isAuthenticated) {
       setCart(null);
@@ -336,20 +361,16 @@ export const CartProvider = ({ children }) => {
     setOfferPrices({});
   };
 
-  // Helper to get price for a cart item (from API or server cart)
   const getItemPrice = useCallback((item) => {
-    // For authenticated users, server cart has the real price
     if (isAuthenticated && item.priceSnapshot) {
       return item.priceSnapshot;
     }
-    // For guests, use the fetched offer price
     const key = `${item.productId}_${item.merchantId}`;
     return offerPrices[key] || 0;
   }, [isAuthenticated, offerPrices]);
 
   const cartItemCount = cart?.items?.reduce((total, item) => total + item.quantity, 0) || 0;
-  
-  // Calculate total using real prices from API
+
   const cartTotal = cart?.items?.reduce((total, item) => {
     const price = getItemPrice(item);
     return total + (price * item.quantity);

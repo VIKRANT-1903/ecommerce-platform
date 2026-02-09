@@ -68,6 +68,5 @@ public class ProductController {
             "/products/search"
         ));
     }
-    
-    // (Optional) If you also wanted the bulk name fetch from earlier, it would go here.
+
 }

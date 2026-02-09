@@ -22,6 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
+import java.util.LinkedHashMap;
 
 @Service
 @RequiredArgsConstructor
@@ -34,10 +36,6 @@ public class OrderService {
     private final CartRepository cartRepository;
     private final ProductServiceClient productServiceClient;
 
-    /**
-     * Create an order from the user's current cart. Total amount is calculated from cart item prices.
-     * Order items are immutable once created (price snapshot from cart).
-     */
     @Transactional
     public OrderResponse createOrder(Integer userId, CreateOrderRequest request) {
         CartResponse cart = cartService.getCart(userId);
@@ -56,6 +54,9 @@ public class OrderService {
                 .paymentStatus(PaymentStatus.PENDING)
                 .shippingAddress(request.shippingAddress())
                 .build();
+
+        // 1. SAVE FIRST: The DB assigns the unique 'orderId' here (e.g., 501).
+        // This 'locks' the sequence position for this order.
         order = orderRepository.save(order);
 
         for (CartItemResponse cartItem : cart.items()) {
@@ -70,6 +71,8 @@ public class OrderService {
         }
 
         log.info("Created order {} for user {}", order.getOrderId(), userId);
+
+        // 2. CALCULATE NUMBER: Now that it's saved, we can count it.
         return toOrderResponse(order);
     }
 
@@ -88,98 +91,56 @@ public class OrderService {
         return orderRepository.findById(orderId)
                 .map(this::toOrderResponse)
                 .orElseGet(() -> {
-                    // Fallback: check if this id refers to a checked-out cart
+                    // Fallback for legacy checked-out carts
                     com.example.ecomm.cart.entity.Cart cart = cartRepository.findById(orderId)
-                        .orElseThrow(() -> new ResourceNotFoundException("Order not found: " + orderId));
+                            .orElseThrow(() -> new ResourceNotFoundException("Order not found: " + orderId));
+
                     if (cart.getStatus() != com.example.ecomm.cart.entity.CartStatus.CHECKED_OUT) {
-                    throw new ResourceNotFoundException("Order not found: " + orderId);
+                        throw new ResourceNotFoundException("Order not found: " + orderId);
                     }
-                    // Map cart entity -> OrderResponse
-                    java.math.BigDecimal total = cart.getItems().stream()
-                        .map(i -> i.getPriceSnapshot().multiply(java.math.BigDecimal.valueOf(i.getQuantity())))
-                        .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
 
-                    List<OrderItemResponse> items = cart.getItems().stream()
-                        .map(i -> OrderItemResponse.builder()
-                            .orderItemId(i.getCartItemId())
-                            .productId(i.getProductId())
-                            .productName(productServiceClient.getProductName(i.getProductId()))
-                            .merchantId(i.getMerchantId())
-                            .quantity(i.getQuantity())
-                            .price(i.getPriceSnapshot())
-                            .build())
-                        .toList();
-
-                    return OrderResponse.builder()
-                        .orderId(cart.getCartId())
-                        .userId(cart.getUserId())
-                        .totalAmount(total)
-                        .orderStatus(cart.getStatus().name())
-                        .paymentStatus("PAID")
-                        .shippingAddress(null)
-                        .createdAt(cart.getUpdatedAt())
-                        .items(items)
-                        .build();
+                    return toOrderResponseFromCart(toCartResponse(cart));
                 });
     }
 
-        @Transactional(readOnly = true)
-        public List<OrderResponse> listOrdersByUser(Integer userId) {
-        // Query Order table (new checkout flow)
+    @Transactional(readOnly = true)
+    public List<OrderResponse> listOrdersByUser(Integer userId) {
         List<OrderResponse> orders = orderRepository.findByUserIdOrderByCreatedAtDesc(userId)
-            .stream()
-            .map(this::toOrderResponse)
-            .toList();
-        
-        // Also include checked-out carts (legacy flow)
+                .stream()
+                .map(this::toOrderResponse)
+                .toList();
+
+        // Include legacy cart orders if any
         List<CartResponse> carts = cartService.listCheckedOutCarts(userId);
         List<OrderResponse> cartOrders = carts.stream()
-            .map(this::toOrderResponseFromCart)
-            .toList();
-        
-        // Combine and sort by creation date descending
+                .map(this::toOrderResponseFromCart)
+                .toList();
+
         List<OrderResponse> allOrders = new java.util.ArrayList<>(orders);
         allOrders.addAll(cartOrders);
         allOrders.sort((a, b) -> b.createdAt().compareTo(a.createdAt()));
-        
+
         return allOrders;
-        }
+    }
 
-        private OrderResponse toOrderResponseFromCart(CartResponse cart) {
-        java.math.BigDecimal total = cart.items().stream()
-            .map(i -> i.priceSnapshot().multiply(java.math.BigDecimal.valueOf(i.quantity())))
-            .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
-
-        List<OrderItemResponse> items = cart.items().stream()
-            .map(i -> OrderItemResponse.builder()
-                .orderItemId(i.cartItemId())
-                .productId(i.productId())
-                .productName(productServiceClient.getProductName(i.productId()))
-                .merchantId(i.merchantId())
-                .quantity(i.quantity())
-                .price(i.priceSnapshot())
-                .build())
-            .toList();
-
-        return OrderResponse.builder()
-            .orderId(cart.cartId())
-            .userId(cart.userId())
-            .totalAmount(total)
-            .orderStatus(cart.status())
-            .paymentStatus("PAID")
-            .shippingAddress(null)
-            .createdAt(cart.updatedAt())
-            .items(items)
-            .build();
-        }
+    // --- MAPPERS ---
 
     private OrderResponse toOrderResponse(Order order) {
         List<OrderItemResponse> items = orderItemRepository.findByOrderOrderIdOrderByOrderItemId(order.getOrderId())
                 .stream()
                 .map(this::toOrderItemResponse)
                 .toList();
+
+        // --- THE MAGIC: Calculate Friendly Number on the fly ---
+        long friendlyNumber = orderRepository.countByUserIdAndOrderIdLessThanEqual(
+                order.getUserId(),
+                order.getOrderId()
+        );
+        // ------------------------------------------------------
+
         return OrderResponse.builder()
                 .orderId(order.getOrderId())
+                .userOrderNumber((int) friendlyNumber) // Map the calculated number
                 .userId(order.getUserId())
                 .totalAmount(order.getTotalAmount())
                 .orderStatus(order.getOrderStatus().name())
@@ -190,25 +151,51 @@ public class OrderService {
                 .build();
     }
 
-    /**
-     * Get orders (sales) for a specific merchant based on items they sold.
-     * Groups items by order to avoid duplicates.
-     */
+    private OrderResponse toOrderResponseFromCart(CartResponse cart) {
+        // ... (standard logic for legacy carts) ...
+        BigDecimal total = cart.items().stream()
+                .map(i -> i.priceSnapshot().multiply(BigDecimal.valueOf(i.quantity())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        List<OrderItemResponse> items = cart.items().stream()
+                .map(i -> OrderItemResponse.builder()
+                        .orderItemId(i.cartItemId())
+                        .productId(i.productId())
+                        .productName(productServiceClient.getProductName(i.productId()))
+                        .merchantId(i.merchantId())
+                        .quantity(i.quantity())
+                        .price(i.priceSnapshot())
+                        .build())
+                .toList();
+
+        return OrderResponse.builder()
+                .orderId(cart.cartId())
+                .userOrderNumber(null) // Legacy carts don't get a friendly number
+                .userId(cart.userId())
+                .totalAmount(total)
+                .orderStatus(cart.status())
+                .paymentStatus("PAID")
+                .shippingAddress(null)
+                .createdAt(cart.updatedAt())
+                .items(items)
+                .build();
+    }
+
+    // Helper to bridge Cart entity to CartResponse
+    private CartResponse toCartResponse(com.example.ecomm.cart.entity.Cart cart) {
+        return cartService.getCart(cart.getUserId());
+    }
+
     @Transactional(readOnly = true)
     public List<OrderResponse> getOrdersForMerchant(Integer merchantId) {
-        // Get all order items sold by this merchant
         List<OrderItem> merchantItems = orderItemRepository.findByMerchantIdOrderByOrderCreatedAtDesc(merchantId);
-        
-        // Group by orderId to get unique orders
-        java.util.Map<Long, Order> ordersMap = new java.util.LinkedHashMap<>();
+        Map<Long, Order> ordersMap = new LinkedHashMap<>();
         for (OrderItem item : merchantItems) {
             ordersMap.putIfAbsent(item.getOrder().getOrderId(), item.getOrder());
         }
-        
-        // Convert to OrderResponse
         return ordersMap.values().stream()
-            .map(this::toOrderResponse)
-            .toList();
+                .map(this::toOrderResponse)
+                .toList();
     }
 
     private OrderItemResponse toOrderItemResponse(OrderItem item) {

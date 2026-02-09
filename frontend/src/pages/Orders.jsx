@@ -22,10 +22,8 @@ const Orders = () => {
     try {
       let resp;
       if (isMerchant && user?.merchantId) {
-        // Fetch merchant sales
         resp = await orderService.getOrdersForMerchant(user.merchantId);
       } else {
-        // Fetch customer orders
         resp = await orderService.getOrdersByUser(user.id);
       }
       if (resp.success) {
@@ -46,9 +44,9 @@ const Orders = () => {
   if (error) {
     return (
       <div className="container mx-auto px-4 py-8">
-        <Alert 
-          type="error" 
-          title="Error Loading Orders" 
+        <Alert
+          type="error"
+          title="Error Loading Orders"
           message={error}
           onClose={() => setError(null)}
         />
@@ -62,7 +60,7 @@ const Orders = () => {
         <EmptyState
           icon={isMerchant ? ShoppingCart : Package}
           title={isMerchant ? "No sales yet" : "No orders yet"}
-          message={isMerchant ? "You haven't received any customer orders yet. Start by adding products to your store." : "You haven't placed any orders yet. Start shopping to see orders here."}
+          message={isMerchant ? "You haven't received any customer orders yet." : "You haven't placed any orders yet."}
           actionText={isMerchant ? "Add Products" : "Start Shopping"}
           actionLink={isMerchant ? "/merchant/products" : "/search"}
         />
@@ -80,7 +78,10 @@ const Orders = () => {
         {orders.map(order => (
           <div key={order.orderId} className="bg-white rounded-lg shadow-sm p-4 flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-500">Order #{order.orderId}</p>
+              <p className="text-sm text-gray-500">
+                {/* CHANGED: Show friendly order number */}
+                Order #{order.userOrderNumber || order.orderId}
+              </p>
               <p className="font-medium text-gray-900">{new Date(order.createdAt).toLocaleString()}</p>
               <p className="text-sm text-gray-600">Total: ${order.totalAmount.toFixed(2)} • {order.orderStatus}</p>
             </div>

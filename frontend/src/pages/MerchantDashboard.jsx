@@ -1,4 +1,4 @@
-// Helper to extract numeric price from offer
+ // Helper to extract numeric price from offer
 function getOfferNumericPrice(offer) {
   if (!offer) return 0;
   const raw = offer.price;

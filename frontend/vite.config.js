@@ -37,10 +37,10 @@ export default defineConfig({
         changeOrigin: true,
       },
       // search-service (port 8083)
-      '/search': {
-        target: 'http://localhost:8083',
-        changeOrigin: true,
-      }
+//      '/search': {
+//        target: 'http://localhost:8083',
+//        changeOrigin: true,
+//      }
     }
   }
 })

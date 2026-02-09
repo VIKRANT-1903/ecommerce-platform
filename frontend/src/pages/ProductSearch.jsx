@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { productService, offerService } from '../services/authService';
 import ProductCard from '../components/common/ProductCard';
 import LoadingSpinner from '../components/common/LoadingSpinner';
-import EmptyState from '../components/common/EmptyState';
+import EmptyState from '../components/common/EmptyState'; // Ensure you have this component or remove it
 import { Search, Filter, X, SlidersHorizontal } from 'lucide-react';
 
 const ProductSearch = () => {
@@ -11,63 +11,84 @@ const ProductSearch = () => {
   const [products, setProducts] = useState([]);
   const [productOffers, setProductOffers] = useState({});
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState(searchParams.get('name') || '');
-  const [selectedCategory, setSelectedCategory] = useState(searchParams.get('category') || '');
+
+  // Initialize state from URL params
+  const initialName = searchParams.get('name') || '';
+  const initialCategory = searchParams.get('category') || '';
+
+  const [searchQuery, setSearchQuery] = useState(initialName);
+  const [selectedCategory, setSelectedCategory] = useState(initialCategory);
   const [showFilters, setShowFilters] = useState(false);
 
   const categories = [
-    'Electronics',
-    'Clothing',
-    'Books',
-    'Home',
-    'Sports',
-    'Toys',
-    'Beauty',
-    'Automotive',
-    'Garden',
-    'Office',
+    'Electronics', 'Clothing', 'Books', 'Home', 'Sports',
+    'Toys', 'Beauty', 'Automotive', 'Garden', 'Office',
   ];
 
+  // Sync local state when URL changes (e.g. back button)
   useEffect(() => {
-    const name = searchParams.get('name');
-    const category = searchParams.get('category');
-    
-    if (name || category) {
-      fetchProducts(name, category);
-    } else {
-      // Default search
-      fetchProducts('a', null);
-    }
+    const name = searchParams.get('name') || '';
+    const category = searchParams.get('category') || '';
+    setSearchQuery(name);
+    setSelectedCategory(category);
+
+    // Fetch Data
+    fetchProducts(name, category);
   }, [searchParams]);
 
   const fetchProducts = async (name, category) => {
     setLoading(true);
+    // Reset offers when searching again to avoid showing old prices
+    setProductOffers({});
+
     try {
       const params = {};
       if (name) params.name = name;
       if (category) params.category = category;
 
+      // 1. Fetch Products
       const response = await productService.search(params);
+
       if (response.success) {
-        setProducts(response.data || []);
-        
-        // Fetch offers for each product
-        const offers = {};
-        for (const product of response.data || []) {
+        const foundProducts = response.data || [];
+        setProducts(foundProducts);
+
+        // --- OPTIMIZATION START: BULK FETCH ---
+        const productIds = foundProducts.map(p => p.id);
+
+        if (productIds.length > 0) {
           try {
-            const offerResponse = await offerService.getByProductId(product.id);
-            if (offerResponse.success && offerResponse.data?.length > 0) {
-              // Get the best price offer
-              const bestOffer = offerResponse.data.reduce((best, current) => 
-                current.price < best.price ? current : best
-              );
-              offers[product.id] = bestOffer;
+            // One single API call for all prices
+            const offerResponse = await offerService.getBulkOffers(productIds);
+
+            if (offerResponse.success && offerResponse.data) {
+              const bulkData = offerResponse.data;
+              const bestOffersMap = {};
+
+              // Find best price for each product
+              Object.keys(bulkData).forEach(productId => {
+                const offers = bulkData[productId];
+                if (offers && offers.length > 0) {
+                  // Reduce to find the cheapest offer
+                  const bestOffer = offers.reduce((min, cur) => {
+                    const priceMin = typeof min.price === 'number' ? min.price : Infinity;
+                    const priceCur = typeof cur.price === 'number' ? cur.price : 0;
+                    return priceCur < priceMin ? cur : min;
+                  }, offers[0]); // Start with first offer
+
+                  bestOffersMap[productId] = bestOffer;
+                }
+              });
+
+              setProductOffers(bestOffersMap);
             }
-          } catch (error) {
-            console.log(`No offers for product ${product.id}`);
+          } catch (offerError) {
+            console.error('Failed to fetch bulk offers:', offerError);
           }
         }
-        setProductOffers(offers);
+        // --- OPTIMIZATION END ---
+      } else {
+        setProducts([]);
       }
     } catch (error) {
       console.error('Failed to fetch products:', error);
@@ -79,28 +100,29 @@ const ProductSearch = () => {
 
   const handleSearch = (e) => {
     e.preventDefault();
-    const newParams = new URLSearchParams();
-    if (searchQuery) newParams.set('name', searchQuery);
-    if (selectedCategory) newParams.set('category', selectedCategory);
-    if (!searchQuery && !selectedCategory) {
-      newParams.set('name', 'a');
-    }
-    setSearchParams(newParams);
+    updateParams(searchQuery, selectedCategory);
   };
 
   const handleCategoryClick = (category) => {
-    setSelectedCategory(category);
-    const newParams = new URLSearchParams();
-    if (searchQuery) newParams.set('name', searchQuery);
-    newParams.set('category', category);
-    setSearchParams(newParams);
+    // If clicking the same category, toggle it off
+    const newCategory = selectedCategory === category ? '' : category;
+    setSelectedCategory(newCategory);
+    updateParams(searchQuery, newCategory);
     setShowFilters(false);
   };
 
   const clearFilters = () => {
     setSearchQuery('');
     setSelectedCategory('');
-    setSearchParams({ name: 'a' });
+    setSearchParams({}); // Clears URL
+  };
+
+  // Helper to update URL params cleanly
+  const updateParams = (name, category) => {
+    const newParams = new URLSearchParams();
+    if (name) newParams.set('name', name);
+    if (category) newParams.set('category', category);
+    setSearchParams(newParams);
   };
 
   return (
@@ -115,55 +137,51 @@ const ProductSearch = () => {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search products..."
-              className="input-field"
-              style={{ paddingLeft: '2.5rem' }}
+              className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-amazon-orange focus:outline-none"
             />
           </div>
           <div className="flex gap-2">
             <button
               type="button"
               onClick={() => setShowFilters(!showFilters)}
-              className="btn-secondary flex items-center gap-2 md:hidden"
+              className="md:hidden px-4 py-2 border rounded-lg flex items-center gap-2 hover:bg-gray-50"
             >
               <SlidersHorizontal className="w-4 h-4" />
               Filters
             </button>
-            <button type="submit" className="btn-primary flex items-center gap-2">
+            <button type="submit" className="btn-primary flex items-center gap-2 px-6 py-2">
               <Search className="w-4 h-4" />
               Search
             </button>
           </div>
         </form>
 
-        {/* Active Filters */}
+        {/* Active Filters Display */}
         {(searchParams.get('name') || searchParams.get('category')) && (
           <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-gray-100">
-            <span className="text-sm text-gray-500">Filters:</span>
+            <span className="text-sm text-gray-500">Active Filters:</span>
+
             {searchParams.get('name') && (
               <span className="inline-flex items-center gap-1 px-3 py-1 bg-gray-100 rounded-full text-sm">
-                Search: "{searchParams.get('name')}"
-              </span>
-            )}
-            {searchParams.get('category') && (
-              <span className="inline-flex items-center gap-1 px-3 py-1 bg-amazon-orange/10 text-amazon-orange rounded-full text-sm">
-                {searchParams.get('category')}
-                <button
-                  onClick={() => {
-                    const newParams = new URLSearchParams(searchParams);
-                    newParams.delete('category');
-                    setSelectedCategory('');
-                    if (!newParams.get('name')) newParams.set('name', 'a');
-                    setSearchParams(newParams);
-                  }}
-                  className="hover:bg-amazon-orange/20 rounded-full p-0.5"
-                >
+                "{searchParams.get('name')}"
+                <button onClick={() => updateParams('', selectedCategory)} className="hover:text-red-500 ml-1">
                   <X className="w-3 h-3" />
                 </button>
               </span>
             )}
+
+            {searchParams.get('category') && (
+              <span className="inline-flex items-center gap-1 px-3 py-1 bg-orange-50 text-amazon-orange rounded-full text-sm border border-orange-100">
+                {searchParams.get('category')}
+                <button onClick={() => updateParams(searchQuery, '')} className="hover:text-red-500 ml-1">
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
             <button
               onClick={clearFilters}
-              className="text-sm text-amazon-orange hover:underline"
+              className="text-sm text-gray-500 hover:text-amazon-orange ml-2 underline"
             >
               Clear all
             </button>
@@ -171,7 +189,7 @@ const ProductSearch = () => {
         )}
       </div>
 
-      <div className="flex gap-6">
+      <div className="flex flex-col md:flex-row gap-6">
         {/* Sidebar Filters - Desktop */}
         <aside className="hidden md:block w-64 flex-shrink-0">
           <div className="bg-white rounded-lg shadow-sm p-4 sticky top-24">
@@ -179,14 +197,14 @@ const ProductSearch = () => {
               <Filter className="w-4 h-4" />
               Categories
             </h3>
-            <ul className="space-y-2">
+            <ul className="space-y-1">
               {categories.map((category) => (
                 <li key={category}>
                   <button
                     onClick={() => handleCategoryClick(category)}
-                    className={`w-full text-left px-3 py-2 rounded-md transition-colors ${
+                    className={`w-full text-left px-3 py-2 rounded-md transition-colors text-sm ${
                       selectedCategory === category
-                        ? 'bg-amazon-orange/10 text-amazon-orange font-medium'
+                        ? 'bg-orange-50 text-amazon-orange font-medium'
                         : 'text-gray-600 hover:bg-gray-50'
                     }`}
                   >
@@ -198,17 +216,17 @@ const ProductSearch = () => {
           </div>
         </aside>
 
-        {/* Mobile Filters */}
+        {/* Mobile Filters Overlay */}
         {showFilters && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 md:hidden">
-            <div className="absolute right-0 top-0 bottom-0 w-80 bg-white shadow-xl p-4 overflow-y-auto">
-              <div className="flex items-center justify-between mb-4">
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 md:hidden flex justify-end">
+            <div className="w-80 bg-white h-full shadow-xl p-4 overflow-y-auto">
+              <div className="flex items-center justify-between mb-6">
                 <h3 className="font-semibold text-gray-900">Filters</h3>
                 <button onClick={() => setShowFilters(false)}>
                   <X className="w-6 h-6 text-gray-500" />
                 </button>
               </div>
-              <div className="mb-4">
+              <div>
                 <h4 className="font-medium text-gray-700 mb-2">Categories</h4>
                 <ul className="space-y-2">
                   {categories.map((category) => (
@@ -217,7 +235,7 @@ const ProductSearch = () => {
                         onClick={() => handleCategoryClick(category)}
                         className={`w-full text-left px-3 py-2 rounded-md transition-colors ${
                           selectedCategory === category
-                            ? 'bg-amazon-orange/10 text-amazon-orange font-medium'
+                            ? 'bg-orange-50 text-amazon-orange font-medium'
                             : 'text-gray-600 hover:bg-gray-50'
                         }`}
                       >
@@ -234,14 +252,14 @@ const ProductSearch = () => {
         {/* Products Grid */}
         <div className="flex-1">
           {loading ? (
-            <div className="flex justify-center py-12">
+            <div className="flex justify-center py-20">
               <LoadingSpinner size="lg" />
             </div>
           ) : products.length > 0 ? (
             <>
-              <div className="flex items-center justify-between mb-4">
+              <div className="mb-4">
                 <p className="text-gray-600">
-                  Showing <span className="font-medium">{products.length}</span> results
+                  Found <span className="font-bold text-gray-900">{products.length}</span> results
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -249,19 +267,22 @@ const ProductSearch = () => {
                   <ProductCard
                     key={product.id}
                     product={product}
-                    offer={productOffers[product.id]}
+                    offer={productOffers[product.id]} // Passing the bulk-fetched offer
                   />
                 ))}
               </div>
             </>
           ) : (
-            <EmptyState
-              icon={Search}
-              title="No products found"
-              message="Try adjusting your search or filter to find what you're looking for."
-              actionText="Clear Filters"
-              onAction={clearFilters}
-            />
+            <div className="bg-white rounded-lg shadow-sm p-12 text-center">
+              <Search className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-xl font-medium text-gray-900 mb-2">No products found</h3>
+              <p className="text-gray-500 mb-6">
+                We couldn't find any products matching your search. Try checking for typos or using different keywords.
+              </p>
+              <button onClick={clearFilters} className="btn-primary">
+                Clear Filters
+              </button>
+            </div>
           )}
         </div>
       </div>

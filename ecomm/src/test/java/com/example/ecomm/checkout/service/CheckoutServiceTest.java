@@ -1,15 +1,23 @@
 package com.example.ecomm.checkout.service;
 
+import com.example.ecomm.cart.dto.CartItemResponse;
+import com.example.ecomm.cart.dto.CartResponse;
 import com.example.ecomm.cart.service.CartService;
 import com.example.ecomm.checkout.dto.CheckoutRequest;
 import com.example.ecomm.checkout.dto.CheckoutResponse;
+import com.example.ecomm.common.exception.ResourceNotFoundException;
+import com.example.ecomm.email.service.EmailService;
+import com.example.ecomm.inventory.dto.ConfirmRequest;
+import com.example.ecomm.inventory.dto.ReleaseRequest;
+import com.example.ecomm.inventory.dto.ReserveRequest;
+import com.example.ecomm.inventory.dto.ReserveResult;
 import com.example.ecomm.inventory.service.InventoryService;
-import com.example.ecomm.order.dto.OrderItemResponse;
+import com.example.ecomm.order.dto.CreateOrderRequest;
 import com.example.ecomm.order.dto.OrderResponse;
+import com.example.ecomm.order.entity.OrderStatus;
+import com.example.ecomm.order.entity.PaymentStatus;
 import com.example.ecomm.order.service.OrderService;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -17,177 +25,151 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.List;
 
-import static org.assertj.core.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-@DisplayName("CheckoutService Tests")
 class CheckoutServiceTest {
 
-    @Mock
-    private OrderService orderService;
-    @Mock
-    private InventoryService inventoryService;
-    @Mock
-    private CartService cartService;
+    @Mock private CartService cartService;
+    @Mock private OrderService orderService;
+    @Mock private InventoryService inventoryService;
+    @Mock private PaymentGateway paymentGateway;
+    @Mock private EmailService emailService;
 
     @InjectMocks
     private CheckoutService checkoutService;
 
-    private Integer testUserId;
+    private Integer userId = 101;
+    private Long orderId = 5000L;
     private CheckoutRequest checkoutRequest;
+    private CartResponse mockCart;
     private OrderResponse mockOrder;
 
     @BeforeEach
     void setUp() {
-        testUserId = 100;
-        checkoutRequest = new CheckoutRequest(
-                "123 Main St, New York, NY 10001"
-        );
-
-        OrderItemResponse item = OrderItemResponse.builder()
-                .orderItemId(1L)
-                .productId("PROD123")
-                .productName("Test Product")
-                .merchantId(5)
-                .quantity(2)
-                .price(new BigDecimal("149.99"))
+        checkoutRequest = CheckoutRequest.builder()
+                .shippingAddress("123 Tech Street")
                 .build();
 
-        mockOrder = new OrderResponse(
-                1L,
-                testUserId,
-                new BigDecimal("299.98"),
-                "PENDING",
-                "PENDING",
-                "123 Main St, New York, NY 10001",
-                Instant.now(),
-                List.of(item)
-        );
+        // Standard Cart with 1 item
+        CartItemResponse item = CartItemResponse.builder()
+                .productId("PROD-1")
+                .merchantId(10)
+                .quantity(2)
+                .priceSnapshot(new BigDecimal("100.00"))
+                .build();
+
+        mockCart = CartResponse.builder()
+                .cartId(1L)
+                .userId(userId)
+                .items(List.of(item))
+                .build();
+
+        mockOrder = OrderResponse.builder()
+                .orderId(orderId)
+                .userId(userId)
+                .totalAmount(new BigDecimal("200.00"))
+                .orderStatus(OrderStatus.CREATED.name())
+                .build();
     }
 
+    // --- SCENARIO 1: HAPPY PATH ---
+    @Test
+    void testCheckout_Success() {
+        // 1. Mock Cart Fetch
+        when(cartService.getCart(userId)).thenReturn(mockCart);
 
-    @Nested
-    @DisplayName("checkout")
-    class CheckoutTests {
+        // 2. Mock Order Creation
+        when(orderService.createOrder(eq(userId), any(CreateOrderRequest.class))).thenReturn(mockOrder);
 
-        @Test
-        @DisplayName("should process checkout successfully and clear cart")
-        void testCheckoutSuccess() {
-            when(orderService.createOrder(testUserId, checkoutRequest))
-                    .thenReturn(mockOrder);
-            when(cartService.clearCart(testUserId))
-                    .thenReturn(true);
+        // 3. Mock Inventory Reserve (Success)
+        when(inventoryService.reserve(any(ReserveRequest.class)))
+                .thenReturn(new ReserveResult(true, "Reserved"));
 
-            CheckoutResponse result = checkoutService.checkout(testUserId, checkoutRequest);
+        // 4. Mock Payment (Success)
+        when(paymentGateway.processPayment(orderId, mockOrder.totalAmount())).thenReturn(true);
 
-            assertThat(result).isNotNull();
-            assertThat(result.success()).isTrue();
-            assertThat(result.orderId()).isEqualTo(1L);
-            assertThat(result.order().totalAmount()).isEqualByComparingTo(new BigDecimal("299.98"));
-            
-            verify(orderService).createOrder(testUserId, checkoutRequest);
-            verify(cartService).clearCart(testUserId);
-        }
+        // 5. Mock Fetch Updated Order (for return)
+        when(orderService.getOrder(orderId)).thenReturn(mockOrder);
 
-        @Test
-        @DisplayName("should return correct order data in response")
-        void testCheckoutReturnsCorrectOrderData() {
-            when(orderService.createOrder(anyInt(), any()))
-                    .thenReturn(mockOrder);
-            when(cartService.clearCart(anyInt()))
-                    .thenReturn(true);
+        // Act
+        CheckoutResponse response = checkoutService.checkout(userId, checkoutRequest);
 
-            CheckoutResponse result = checkoutService.checkout(testUserId, checkoutRequest);
+        // Assert
+        assertTrue(response.success());
+        assertEquals(orderId, response.orderId());
 
-            assertThat(result.order())
-                    .isNotNull()
-                    .extracting("orderId", "userId", "orderStatus", "paymentStatus")
-                    .containsExactly(1L, testUserId, "PENDING", "PENDING");
-            
-            assertThat(result.order().items())
-                    .hasSize(1)
-                    .allMatch(item -> item.productName().equals("Test Product"));
-        }
+        // Verify Flow
+        verify(inventoryService, times(1)).reserve(any(ReserveRequest.class)); // Reserved
+        verify(paymentGateway, times(1)).processPayment(eq(orderId), any()); // Paid
+        verify(inventoryService, times(1)).confirm(any(ConfirmRequest.class)); // Confirmed
+        verify(orderService).updateOrderStatus(orderId, OrderStatus.PAID, PaymentStatus.PAID); // Marked Paid
+        verify(cartService).clearCart(userId); // Cart Cleared
+        verify(emailService).sendOrderConfirmation(orderId, userId, true); // Email Sent
+    }
 
-        @Test
-        @DisplayName("should handle inventory not found gracefully")
-        void testCheckoutWithNoInventory() {
-            when(orderService.createOrder(testUserId, checkoutRequest))
-                    .thenReturn(mockOrder);
-            when(cartService.clearCart(testUserId))
-                    .thenReturn(true);
+    // --- SCENARIO 2: PAYMENT FAILURE (COMPENSATION) ---
+    @Test
+    void testCheckout_PaymentFailed_ShouldReleaseInventory() {
+        // Arrange
+        when(cartService.getCart(userId)).thenReturn(mockCart);
+        when(orderService.createOrder(eq(userId), any())).thenReturn(mockOrder);
+        when(inventoryService.reserve(any())).thenReturn(new ReserveResult(true, "Reserved"));
 
-            CheckoutResponse result = checkoutService.checkout(testUserId, checkoutRequest);
+        // Mock Payment FAILS
+        when(paymentGateway.processPayment(any(), any())).thenReturn(false);
 
-            assertThat(result.success()).isTrue();
-            assertThat(result.orderId()).isEqualTo(1L);
-        }
+        // Act
+        CheckoutResponse response = checkoutService.checkout(userId, checkoutRequest);
 
-        @Test
-        @DisplayName("should handle cart clear failure gracefully")
-        void testCheckoutWithCartClearFailure() {
-            when(orderService.createOrder(testUserId, checkoutRequest))
-                    .thenReturn(mockOrder);
-            when(cartService.clearCart(testUserId))
-                    .thenReturn(false);
+        // Assert
+        assertFalse(response.success());
+        assertEquals("Payment failed", response.message());
 
-            CheckoutResponse result = checkoutService.checkout(testUserId, checkoutRequest);
+        // Verify Compensation Logic
+        verify(inventoryService, times(1)).reserve(any()); // Tried to reserve
+        verify(inventoryService, times(1)).release(any(ReleaseRequest.class)); // COMPENSATION: Released!
+        verify(orderService).updateOrderStatus(orderId, OrderStatus.FAILED, PaymentStatus.FAILED); // Marked Failed
+        verify(cartService, never()).clearCart(anyInt()); // Cart should NOT be cleared so user can retry
+    }
 
-            assertThat(result.orderId()).isEqualTo(1L);
-            verify(orderService).createOrder(testUserId, checkoutRequest);
-        }
+    // --- SCENARIO 3: INVENTORY RESERVATION FAILURE ---
+    @Test
+    void testCheckout_InventoryReserveFailed() {
+        // Arrange
+        when(cartService.getCart(userId)).thenReturn(mockCart);
+        when(orderService.createOrder(eq(userId), any())).thenReturn(mockOrder);
 
-        @Test
-        @DisplayName("should process payment successfully")
-        void testCheckoutPaymentProcessing() {
-            DummyPaymentGateway paymentGateway = new DummyPaymentGateway();
-            
-            boolean paymentSuccess = paymentGateway.processPayment(
-                    mockOrder.orderId(),
-                    mockOrder.totalAmount()
-            );
+        // Mock Inventory FAILS
+        when(inventoryService.reserve(any()))
+                .thenReturn(new ReserveResult(false, "Out of stock"));
 
-            assertThat(paymentSuccess).isTrue();
-        }
+        // Act
+        CheckoutResponse response = checkoutService.checkout(userId, checkoutRequest);
 
-        @Test
-        @DisplayName("should fail gracefully when order creation fails")
-        void testCheckoutOrderCreationFailure() {
-            when(orderService.createOrder(anyInt(), any()))
-                    .thenThrow(new RuntimeException("Order creation failed"));
+        // Assert
+        assertFalse(response.success());
+        assertTrue(response.message().contains("Out of stock"));
 
-            assertThatThrownBy(() -> checkoutService.checkout(testUserId, checkoutRequest))
-                    .isInstanceOf(RuntimeException.class)
-                    .hasMessage("Order creation failed");
+        // Verify Flow
+        verify(paymentGateway, never()).processPayment(any(), any()); // Should NOT charge user
+        verify(inventoryService, never()).confirm(any()); // Should NOT confirm
+        verify(orderService).updateOrderStatus(orderId, OrderStatus.FAILED, PaymentStatus.FAILED);
+    }
 
-            verify(cartService, never()).clearCart(anyInt());
-        }
+    // --- SCENARIO 4: EMPTY CART ---
+    @Test
+    void testCheckout_EmptyCart_ThrowsException() {
+        CartResponse emptyCart = CartResponse.builder().items(List.of()).build();
+        when(cartService.getCart(userId)).thenReturn(emptyCart);
 
-        @Test
-        @DisplayName("should calculate correct total from cart items")
-        void testCheckoutTotalCalculation() {
-            assertThat(mockOrder.totalAmount())
-                    .isEqualByComparingTo(new BigDecimal("299.98"));
-        }
-
-        @Test
-        @DisplayName("should include shipping address in order")
-        void testCheckoutIncludesShippingAddress() {
-            when(orderService.createOrder(testUserId, checkoutRequest))
-                    .thenReturn(mockOrder);
-            when(cartService.clearCart(testUserId))
-                    .thenReturn(true);
-
-            CheckoutResponse result = checkoutService.checkout(testUserId, checkoutRequest);
-
-            assertThat(result.order().shippingAddress())
-                    .isEqualTo("123 Main St, New York, NY 10001");
-        }
+        assertThrows(IllegalArgumentException.class, () ->
+                checkoutService.checkout(userId, checkoutRequest)
+        );
     }
 }

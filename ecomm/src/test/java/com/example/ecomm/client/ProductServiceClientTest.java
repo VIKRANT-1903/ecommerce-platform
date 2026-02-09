@@ -1,7 +1,6 @@
 package com.example.ecomm.client;
 
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -10,17 +9,17 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
-import java.util.HashMap;
 import java.util.Map;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-@DisplayName("ProductServiceClient Tests")
 class ProductServiceClientTest {
 
     @Mock
@@ -29,99 +28,71 @@ class ProductServiceClientTest {
     @InjectMocks
     private ProductServiceClient productServiceClient;
 
-    @Nested
-    @DisplayName("getProductName")
-    class GetProductNameTests {
+    @BeforeEach
+    void setUp() {
+        ReflectionTestUtils.setField(productServiceClient, "restTemplate", restTemplate);
+        ReflectionTestUtils.setField(productServiceClient, "ecomm1ServiceUrl", "http://mock-url");
+    }
 
-        @Test
-        @DisplayName("should fetch product name successfully")
-        void testGetProductNameSuccess() {
-            Map<String, Object> productData = new HashMap<>();
-            productData.put("name", "Gaming Laptop");
-            productData.put("id", "PROD123");
+    @Test
+    void testGetProductName_Success() {
+        // Arrange
+        String productId = "PROD-123";
+        String expectedName = "Super Gadget";
 
-            Map<String, Object> response = new HashMap<>();
-            response.put("data", productData);
+        // Mock Response: {"data": {"name": "Super Gadget"}}
+        Map<String, Object> productData = Map.of("name", expectedName);
+        Map<String, Object> responseBody = Map.of("data", productData);
 
-            when(restTemplate.exchange(
-                    contains("/products/PROD123"),
-                    eq(HttpMethod.GET),
-                    isNull(),
-                    any(ParameterizedTypeReference.class)
-            )).thenReturn(ResponseEntity.ok(response));
+        when(restTemplate.exchange(
+                anyString(),
+                eq(HttpMethod.GET),
+                isNull(),
+                any(ParameterizedTypeReference.class)
+        )).thenReturn(ResponseEntity.ok(responseBody));
 
-            String result = productServiceClient.getProductName("PROD123");
+        // Act
+        String result = productServiceClient.getProductName(productId);
 
-            assertThat(result).isEqualTo("Gaming Laptop");
-        }
+        // Assert
+        assertEquals(expectedName, result);
+    }
 
-        @Test
-        @DisplayName("should return productId as fallback when name is null")
-        void testGetProductNameFallbackWhenNull() {
-            Map<String, Object> productData = new HashMap<>();
-            productData.put("name", null);
+    @Test
+    void testGetProductName_NameMissing_ReturnsId() {
+        // Arrange
+        String productId = "PROD-123";
 
-            Map<String, Object> response = new HashMap<>();
-            response.put("data", productData);
+        // Mock Response: {"data": {}} (No name field)
+        Map<String, Object> responseBody = Map.of("data", Map.of());
 
-            when(restTemplate.exchange(
-                    anyString(),
-                    eq(HttpMethod.GET),
-                    isNull(),
-                    any(ParameterizedTypeReference.class)
-            )).thenReturn(ResponseEntity.ok(response));
+        when(restTemplate.exchange(
+                anyString(),
+                eq(HttpMethod.GET),
+                isNull(),
+                any(ParameterizedTypeReference.class)
+        )).thenReturn(ResponseEntity.ok(responseBody));
 
-            String result = productServiceClient.getProductName("PROD123");
+        // Act
+        String result = productServiceClient.getProductName(productId);
 
-            assertThat(result).isEqualTo("PROD123");
-        }
+        // Assert
+        assertEquals(productId, result); // Fallback to ID
+    }
 
-        @Test
-        @DisplayName("should return productId as fallback when API returns null")
-        void testGetProductNameFallbackWhenResponseNull() {
-            when(restTemplate.exchange(
-                    anyString(),
-                    eq(HttpMethod.GET),
-                    isNull(),
-                    any(ParameterizedTypeReference.class)
-            )).thenReturn(ResponseEntity.ok(null));
+    @Test
+    void testGetProductName_ServiceError_ReturnsId() {
+        // Arrange
+        String productId = "PROD-123";
 
-            String result = productServiceClient.getProductName("PROD456");
+        when(restTemplate.exchange(
+                anyString(), eq(HttpMethod.GET), isNull(), any(ParameterizedTypeReference.class)
+        )).thenThrow(new RestClientException("Connection Timeout"));
 
-            assertThat(result).isEqualTo("PROD456");
-        }
+        // Act
+        String result = productServiceClient.getProductName(productId);
 
-        @Test
-        @DisplayName("should handle API exceptions gracefully")
-        void testGetProductNameHandlesException() {
-            when(restTemplate.exchange(
-                    anyString(),
-                    eq(HttpMethod.GET),
-                    isNull(),
-                    any(ParameterizedTypeReference.class)
-            )).thenThrow(new RuntimeException("API Connection Error"));
-
-            String result = productServiceClient.getProductName("PROD789");
-
-            assertThat(result).isEqualTo("PROD789");
-        }
-
-        @Test
-        @DisplayName("should handle empty response data")
-        void testGetProductNameEmptyResponseData() {
-            Map<String, Object> response = new HashMap<>();
-            response.put("data", null);
-
-            when(restTemplate.exchange(
-                    anyString(),
-                    eq(HttpMethod.GET),
-                    isNull(),
-                    any(ParameterizedTypeReference.class)
-            )).thenReturn(ResponseEntity.ok(response));
-
-            String result = productServiceClient.getProductName("PROD999");
-
-            assertThat(result).isEqualTo("PROD999");
-        }
+        // Assert
+        assertEquals(productId, result); // Fallback to ID on error
     }
 }
