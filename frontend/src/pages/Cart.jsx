@@ -4,7 +4,6 @@ import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { productService } from '../services/authService';
 import LoadingSpinner from '../components/common/LoadingSpinner';
-import EmptyState from '../components/common/EmptyState';
 import {
   ShoppingCart,
   Minus,
@@ -18,7 +17,7 @@ import {
 
 const Cart = () => {
   const navigate = useNavigate();
-  const { user, isAuthenticated } = useAuth();
+  const { user } = useAuth();
   const {
     cart,
     loading,
@@ -31,7 +30,7 @@ const Cart = () => {
     fetchCart,
     isGuest,
   } = useCart();
-  
+
   const [localProductDetails, setLocalProductDetails] = useState({});
   const [updating, setUpdating] = useState(null);
 
@@ -39,17 +38,17 @@ const Cart = () => {
     if (user?.id) {
       fetchCart();
     }
-  }, [user?.id]);
+  }, [user?.id, fetchCart]);
 
   useEffect(() => {
     // Fetch product details for items not already loaded
     const fetchMissingProducts = async () => {
       if (!cart?.items) return;
-      
+
       const missingProducts = cart.items.filter(
         item => !productDetails[item.productId] && !localProductDetails[item.productId]
       );
-      
+
       for (const item of missingProducts) {
         try {
           const response = await productService.getById(item.productId);
@@ -64,9 +63,9 @@ const Cart = () => {
         }
       }
     };
-    
+
     fetchMissingProducts();
-  }, [cart?.items, productDetails]);
+  }, [cart?.items, productDetails, localProductDetails]);
 
   const handleUpdateQuantity = async (cartItemId, newQuantity) => {
     if (newQuantity < 1) return;
@@ -95,14 +94,21 @@ const Cart = () => {
 
   if (!cart?.items || cart.items.length === 0) {
     return (
-      <div className="container mx-auto px-4 py-12">
-        <EmptyState
-          icon={ShoppingCart}
-          title="Your cart is empty"
-          message="Looks like you haven't added anything to your cart yet. Start shopping to fill it up!"
-          actionText="Start Shopping"
-          actionLink="/search?name=a"
-        />
+      <div className="container mx-auto px-4 py-12 flex flex-col items-center justify-center text-center">
+        <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-6">
+          <ShoppingCart className="w-12 h-12 text-gray-400" />
+        </div>
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Your cart is empty</h2>
+        <p className="text-gray-600 mb-8 max-w-md">
+          Looks like you haven't added anything to your cart yet. Start shopping to fill it up!
+        </p>
+        <Link
+          to="/search?name=a"
+          className="btn-primary inline-flex items-center gap-2 px-8 py-3"
+        >
+          Start Shopping
+          <ArrowRight className="w-5 h-5" />
+        </Link>
       </div>
     );
   }
@@ -116,8 +122,9 @@ const Cart = () => {
         <div className="lg:col-span-2 space-y-4">
           {cart.items.map((item) => {
             const product = getProductInfo(item.productId);
+            // Updated placeholder to be more generic if needed, or keep your source
             const placeholderImage = `https://via.placeholder.com/150x150?text=Product`;
-            
+
             return (
               <div
                 key={item.cartItemId}
@@ -128,38 +135,42 @@ const Cart = () => {
                 {/* Product Image */}
                 <Link
                   to={`/product/${item.productId}`}
-                  className="w-24 h-24 flex-shrink-0"
+                  className="w-24 h-24 flex-shrink-0 bg-gray-100 rounded-lg overflow-hidden"
                 >
                   <img
                     src={product?.imageUrl || placeholderImage}
                     alt={product?.name || 'Product'}
-                    className="w-full h-full object-cover rounded-lg"
+                    className="w-full h-full object-cover"
                     onError={(e) => {
+                      e.target.onerror = null; // Prevent infinite loop
                       e.target.src = placeholderImage;
                     }}
                   />
                 </Link>
 
                 {/* Product Info */}
-                <div className="flex-1 min-w-0">
-                  <Link
-                    to={`/product/${item.productId}`}
-                    className="text-lg font-medium text-gray-900 hover:text-amazon-orange line-clamp-2"
-                  >
-                    {product?.name || `Product ${item.productId}`}
-                  </Link>
-                  
-                  {product?.brand && (
-                    <p className="text-sm text-gray-500 mt-1">{product.brand}</p>
-                  )}
-                  
-                  <p className="text-sm text-gray-500">
-                    Merchant ID: {item.merchantId}
-                  </p>
-                  
-                  <p className="text-green-600 text-sm mt-1">In Stock</p>
+                <div className="flex-1 min-w-0 flex flex-col justify-between">
+                  <div>
+                    <Link
+                      to={`/product/${item.productId}`}
+                      className="text-lg font-medium text-gray-900 hover:text-amazon-orange line-clamp-2"
+                    >
+                      {product?.name || `Product ${item.productId}`}
+                    </Link>
 
-                  {/* Quantity & Remove - Mobile */}
+                    {product?.brand && (
+                      <p className="text-sm text-gray-500 mt-1">{product.brand}</p>
+                    )}
+
+                    {/* Optional: Show Merchant ID only if relevant for debugging or user info */}
+                    {/* <p className="text-xs text-gray-400 mt-1">Merchant: {item.merchantId}</p> */}
+
+                    <p className="text-green-600 text-sm mt-1 flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3" /> In Stock
+                    </p>
+                  </div>
+
+                  {/* Mobile Controls */}
                   <div className="flex items-center justify-between mt-4 lg:hidden">
                     <div className="flex items-center gap-2">
                       <button
@@ -189,8 +200,8 @@ const Cart = () => {
                   </div>
                 </div>
 
-                {/* Price & Actions - Desktop */}
-                <div className="hidden lg:flex flex-col items-end justify-between">
+                {/* Desktop Price & Actions */}
+                <div className="hidden lg:flex flex-col items-end justify-between min-w-[120px]">
                   <div className="text-right">
                     <p className="text-lg font-bold text-gray-900">
                       ${(getItemPrice(item) * item.quantity).toFixed(2)}
@@ -199,7 +210,7 @@ const Cart = () => {
                       ${getItemPrice(item).toFixed(2)} each
                     </p>
                   </div>
-                  
+
                   <div className="flex items-center gap-4">
                     <div className="flex items-center gap-2">
                       <button
@@ -221,7 +232,8 @@ const Cart = () => {
                     <button
                       onClick={() => handleRemoveItem(item.cartItemId)}
                       disabled={updating === item.cartItemId}
-                      className="text-red-600 hover:text-red-700"
+                      className="text-red-600 hover:text-red-700 p-2 rounded-full hover:bg-red-50 transition-colors"
+                      title="Remove item"
                     >
                       <Trash2 className="w-5 h-5" />
                     </button>
@@ -236,7 +248,7 @@ const Cart = () => {
         <div className="lg:col-span-1">
           <div className="bg-white rounded-lg shadow-sm p-6 sticky top-24">
             <h2 className="text-lg font-bold text-gray-900 mb-4">Order Summary</h2>
-            
+
             <div className="space-y-3 mb-4">
               <div className="flex justify-between text-gray-600">
                 <span>Items ({cartItemCount})</span>
@@ -244,18 +256,16 @@ const Cart = () => {
               </div>
               <div className="flex justify-between text-gray-600">
                 <span>Shipping</span>
-                <span className="text-green-600">Free</span>
+                <span className="text-green-600 font-medium">Free</span>
               </div>
-              <div className="flex justify-between text-gray-600">
-                <span>Estimated Tax</span>
-                <span>${(cartTotal * 0.08).toFixed(2)}</span>
-              </div>
+              {/* Removed Estimated Tax row */}
             </div>
-            
+
             <div className="border-t border-gray-200 pt-4 mb-6">
               <div className="flex justify-between text-lg font-bold text-gray-900">
                 <span>Order Total</span>
-                <span>${(cartTotal * 1.08).toFixed(2)}</span>
+                {/* Now shows exactly cartTotal (no tax multiplier) */}
+                <span>${cartTotal.toFixed(2)}</span>
               </div>
             </div>
 

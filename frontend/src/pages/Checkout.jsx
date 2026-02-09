@@ -19,7 +19,7 @@ const Checkout = () => {
   const navigate = useNavigate();
   const { user, isAuthenticated } = useAuth();
   const { cart, cartItemCount, cartTotal, checkout, productDetails, fetchCart, isGuest, getItemPrice } = useCart();
-  
+
   const [shippingAddress, setShippingAddress] = useState({
     street: '',
     city: '',
@@ -34,8 +34,8 @@ const Checkout = () => {
 
   useEffect(() => {
     if (!isAuthenticated || isGuest) {
-      navigate('/login?redirect=/checkout', { 
-        state: { from: '/checkout', message: 'Please sign in to complete your purchase' } 
+      navigate('/login?redirect=/checkout', {
+        state: { from: '/checkout', message: 'Please sign in to complete your purchase' }
       });
     }
   }, [isAuthenticated, isGuest, navigate]);
@@ -57,11 +57,11 @@ const Checkout = () => {
     // Fetch product details
     const fetchMissingProducts = async () => {
       if (!cart?.items) return;
-      
+
       const missingProducts = cart.items.filter(
         item => !productDetails[item.productId] && !localProductDetails[item.productId]
       );
-      
+
       for (const item of missingProducts) {
         try {
           const response = await productService.getById(item.productId);
@@ -76,7 +76,7 @@ const Checkout = () => {
         }
       }
     };
-    
+
     fetchMissingProducts();
   }, [cart?.items, productDetails]);
 
@@ -101,7 +101,7 @@ const Checkout = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setCheckoutError(null);
-    
+
     if (!validate()) return;
 
     const fullAddress = `${shippingAddress.street}, ${shippingAddress.city}, ${shippingAddress.state} ${shippingAddress.zipCode}, ${shippingAddress.country}`;
@@ -132,9 +132,6 @@ const Checkout = () => {
   if (!cart?.items || cart.items.length === 0) {
     return <LoadingSpinner fullScreen />;
   }
-
-  const tax = cartTotal * 0.08;
-  const total = cartTotal + tax;
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -169,7 +166,7 @@ const Checkout = () => {
                 <MapPin className="w-5 h-5 text-amazon-orange" />
                 Shipping Address
               </h2>
-              
+
               <div className="space-y-4">
                 <div>
                   <label htmlFor="street" className="block text-sm font-medium text-gray-700 mb-1">
@@ -264,7 +261,7 @@ const Checkout = () => {
                 <CreditCard className="w-5 h-5 text-amazon-orange" />
                 Payment Method
               </h2>
-              
+
               <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 bg-amazon-orange/10 rounded-full flex items-center justify-center">
@@ -278,7 +275,7 @@ const Checkout = () => {
                   </div>
                 </div>
               </div>
-              
+
               <div className="mt-4 flex items-center gap-2 text-sm text-gray-500">
                 <Lock className="w-4 h-4" />
                 <span>Your payment information is secure</span>
@@ -290,7 +287,7 @@ const Checkout = () => {
               <h2 className="text-lg font-bold text-gray-900 mb-4">
                 Order Items ({cartItemCount})
               </h2>
-              
+
               <div className="divide-y divide-gray-100">
                 {cart.items.map((item) => {
                   const product = getProductInfo(item.productId);
@@ -325,7 +322,7 @@ const Checkout = () => {
           <div className="lg:col-span-1">
             <div className="bg-white rounded-lg shadow-sm p-6 sticky top-24">
               <h2 className="text-lg font-bold text-gray-900 mb-4">Order Summary</h2>
-              
+
               <div className="space-y-3 mb-4">
                 <div className="flex justify-between text-gray-600">
                   <span>Items ({cartItemCount})</span>
@@ -335,16 +332,13 @@ const Checkout = () => {
                   <span>Shipping</span>
                   <span className="text-green-600">Free</span>
                 </div>
-                <div className="flex justify-between text-gray-600">
-                  <span>Estimated Tax</span>
-                  <span>${tax.toFixed(2)}</span>
-                </div>
               </div>
-              
+
               <div className="border-t border-gray-200 pt-4 mb-6">
                 <div className="flex justify-between text-lg font-bold text-gray-900">
                   <span>Order Total</span>
-                  <span>${total.toFixed(2)}</span>
+                  {/* Changed to use cartTotal directly without tax */}
+                  <span>${cartTotal.toFixed(2)}</span>
                 </div>
               </div>
 

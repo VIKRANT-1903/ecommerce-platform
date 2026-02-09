@@ -113,7 +113,6 @@ const OrderConfirmation = () => {
         </p>
         <div className="inline-block bg-white px-4 py-2 rounded-full border border-green-200">
           <p className="text-sm font-semibold text-gray-700">
-            {/* CHANGED: Use friendly order number */}
             Order Number: <span className="text-amazon-orange">#{order.userOrderNumber || order.orderId}</span>
           </p>
         </div>
@@ -161,7 +160,6 @@ const OrderConfirmation = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Order Details */}
         <div className="lg:col-span-2 space-y-8">
           <div className="bg-white rounded-lg shadow-sm p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4">Items Ordered</h2>
@@ -200,16 +198,10 @@ const OrderConfirmation = () => {
           </div>
         </div>
 
-        {/* Sidebar */}
         <div className="lg:col-span-1 space-y-6">
           <div className="bg-white rounded-lg shadow-sm p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4">Order Summary</h2>
             <div className="space-y-3 text-sm pb-4 border-b border-gray-100">
-              <div className="flex justify-between text-gray-600">
-                 <span>Order Number</span>
-                 {/* CHANGED: Use friendly number */}
-                 <span className="font-medium text-gray-900">#{order.userOrderNumber || order.orderId}</span>
-              </div>
               <div className="flex justify-between text-gray-600">
                 <span>Subtotal</span>
                 <span>${order.totalAmount?.toFixed(2)}</span>
