@@ -5,6 +5,8 @@ import com.example.ecomm.cart.dto.CartResponse;
 import com.example.ecomm.cart.service.CartService;
 import com.example.ecomm.client.ProductServiceClient;
 import com.example.ecomm.common.exception.ResourceNotFoundException;
+
+import com.example.ecomm.email.service.EmailService;
 import com.example.ecomm.order.dto.CreateOrderRequest;
 import com.example.ecomm.order.dto.OrderItemResponse;
 import com.example.ecomm.order.dto.OrderResponse;
@@ -34,6 +36,7 @@ public class OrderService {
     private final OrderItemRepository orderItemRepository;
     private final CartRepository cartRepository;
     private final ProductServiceClient productServiceClient;
+    private final EmailService emailService;
 
     @Transactional
     public OrderResponse createOrder(Integer userId, CreateOrderRequest request) {
@@ -42,10 +45,12 @@ public class OrderService {
             throw new IllegalArgumentException("Cart is empty");
         }
 
+        // 1. Calculate Total
         BigDecimal totalAmount = cart.items().stream()
                 .map(item -> item.priceSnapshot().multiply(BigDecimal.valueOf(item.quantity())))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
+        // 2. Create Order
         Order order = Order.builder()
                 .userId(userId)
                 .totalAmount(totalAmount)
@@ -54,15 +59,9 @@ public class OrderService {
                 .shippingAddress(request.shippingAddress())
                 .build();
 
-        // 1. SAVE: Generates the global ID (e.g., 57)
         order = orderRepository.save(order);
 
-        // 2. CALCULATE FRIENDLY NUMBER (e.g., 1)
-        long friendlyCount = orderRepository.countByUserIdAndOrderIdLessThanEqual(userId, order.getOrderId());
-
-        // 3. ATTACH TO OBJECT: Now the Email Service can read 'order.getUserOrderNumber()'
-        order.setUserOrderNumber((int) friendlyCount);
-
+        // 3. Save Items
         List<OrderItem> savedItems = new ArrayList<>();
         for (CartItemResponse cartItem : cart.items()) {
             OrderItem orderItem = OrderItem.builder()
@@ -72,16 +71,17 @@ public class OrderService {
                     .quantity(cartItem.quantity())
                     .price(cartItem.priceSnapshot())
                     .build();
+
             orderItemRepository.save(orderItem);
             savedItems.add(orderItem);
         }
         order.setItems(savedItems);
 
-        log.info("Created order #{} (Global ID: {}) for user {}", friendlyCount, order.getOrderId(), userId);
+        // 4. Send Email (Standard ID)
+        // We pass IDs here because we reverted EmailService signature below
+        emailService.sendOrderConfirmation(order.getOrderId(), userId, true);
 
-        // The 'order' object now has the correct number inside it.
-        // When your EmailListener / EmailService picks this up, it will see the correct number.
-
+        log.info("Created order #{} for user {}", order.getOrderId(), userId);
         return toOrderResponse(order);
     }
 
@@ -138,7 +138,6 @@ public class OrderService {
                 .map(i -> OrderItemResponse.builder()
                         .orderItemId(i.cartItemId())
                         .productId(i.productId())
-                        .productName(productServiceClient.getProductName(i.productId()))
                         .merchantId(i.merchantId())
                         .quantity(i.quantity())
                         .price(i.priceSnapshot())
@@ -167,18 +166,9 @@ public class OrderService {
                 .map(this::toOrderItemResponse)
                 .toList();
 
-        // Calculate friendly number if it's missing (e.g. when viewing history)
-        if (order.getUserOrderNumber() == null) {
-            long count = orderRepository.countByUserIdAndOrderIdLessThanEqual(
-                    order.getUserId(),
-                    order.getOrderId()
-            );
-            order.setUserOrderNumber((int) count);
-        }
-
         return OrderResponse.builder()
                 .orderId(order.getOrderId())
-                .userOrderNumber(order.getUserOrderNumber()) // Map new field
+                // Removed userOrderNumber mapping
                 .userId(order.getUserId())
                 .totalAmount(order.getTotalAmount())
                 .orderStatus(order.getOrderStatus().name())
@@ -207,7 +197,6 @@ public class OrderService {
         return OrderItemResponse.builder()
                 .orderItemId(item.getOrderItemId())
                 .productId(item.getProductId())
-                .productName(productServiceClient.getProductName(item.getProductId()))
                 .merchantId(item.getMerchantId())
                 .quantity(item.getQuantity())
                 .price(item.getPrice())

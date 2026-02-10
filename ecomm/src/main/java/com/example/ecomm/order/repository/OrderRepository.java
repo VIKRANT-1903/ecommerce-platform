@@ -9,8 +9,5 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     List<Order> findByUserIdOrderByCreatedAtDesc(Integer userId);
 
-    // --- ADD THIS QUERY ---
-    // Counts how many orders this user has up to the current orderId.
-    // This calculates "Order #1", "Order #2" dynamically.
-    long countByUserIdAndOrderIdLessThanEqual(Integer userId, Long orderId);
+
 }

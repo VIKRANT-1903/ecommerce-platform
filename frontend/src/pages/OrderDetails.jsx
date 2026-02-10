@@ -81,8 +81,7 @@ const OrderDetails = () => {
 
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">
-          {/* CHANGED: Friendly Order Number */}
-          Order #{order.userOrderNumber || order.orderId}
+         Order #{order.orderId}
         </h1>
         <div className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(order.orderStatus)}`}>
           {order.orderStatus}

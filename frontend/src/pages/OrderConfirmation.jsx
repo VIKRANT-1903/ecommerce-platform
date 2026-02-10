@@ -113,7 +113,7 @@ const OrderConfirmation = () => {
         </p>
         <div className="inline-block bg-white px-4 py-2 rounded-full border border-green-200">
           <p className="text-sm font-semibold text-gray-700">
-            Order Number: <span className="text-amazon-orange">#{order.userOrderNumber || order.orderId}</span>
+            Order Number: <span className="text-amazon-orange">#{order.orderId}</span>
           </p>
         </div>
       </div>

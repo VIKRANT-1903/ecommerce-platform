@@ -41,7 +41,6 @@ const Cart = () => {
   }, [user?.id, fetchCart]);
 
   useEffect(() => {
-    // Fetch product details for items not already loaded
     const fetchMissingProducts = async () => {
       if (!cart?.items) return;
 
@@ -118,11 +117,9 @@ const Cart = () => {
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Shopping Cart</h1>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Cart Items */}
         <div className="lg:col-span-2 space-y-4">
           {cart.items.map((item) => {
             const product = getProductInfo(item.productId);
-            // Updated placeholder to be more generic if needed, or keep your source
             const placeholderImage = `https://via.placeholder.com/150x150?text=Product`;
 
             return (
@@ -132,7 +129,6 @@ const Cart = () => {
                   updating === item.cartItemId ? 'opacity-50' : ''
                 }`}
               >
-                {/* Product Image */}
                 <Link
                   to={`/product/${item.productId}`}
                   className="w-24 h-24 flex-shrink-0 bg-gray-100 rounded-lg overflow-hidden"
@@ -142,13 +138,12 @@ const Cart = () => {
                     alt={product?.name || 'Product'}
                     className="w-full h-full object-cover"
                     onError={(e) => {
-                      e.target.onerror = null; // Prevent infinite loop
+                      e.target.onerror = null;
                       e.target.src = placeholderImage;
                     }}
                   />
                 </Link>
 
-                {/* Product Info */}
                 <div className="flex-1 min-w-0 flex flex-col justify-between">
                   <div>
                     <Link
@@ -157,20 +152,14 @@ const Cart = () => {
                     >
                       {product?.name || `Product ${item.productId}`}
                     </Link>
-
                     {product?.brand && (
                       <p className="text-sm text-gray-500 mt-1">{product.brand}</p>
                     )}
-
-                    {/* Optional: Show Merchant ID only if relevant for debugging or user info */}
-                    {/* <p className="text-xs text-gray-400 mt-1">Merchant: {item.merchantId}</p> */}
-
                     <p className="text-green-600 text-sm mt-1 flex items-center gap-1">
                       <ShieldCheck className="w-3 h-3" /> In Stock
                     </p>
                   </div>
 
-                  {/* Mobile Controls */}
                   <div className="flex items-center justify-between mt-4 lg:hidden">
                     <div className="flex items-center gap-2">
                       <button
@@ -200,7 +189,6 @@ const Cart = () => {
                   </div>
                 </div>
 
-                {/* Desktop Price & Actions */}
                 <div className="hidden lg:flex flex-col items-end justify-between min-w-[120px]">
                   <div className="text-right">
                     <p className="text-lg font-bold text-gray-900">
@@ -244,7 +232,6 @@ const Cart = () => {
           })}
         </div>
 
-        {/* Order Summary */}
         <div className="lg:col-span-1">
           <div className="bg-white rounded-lg shadow-sm p-6 sticky top-24">
             <h2 className="text-lg font-bold text-gray-900 mb-4">Order Summary</h2>
@@ -258,13 +245,11 @@ const Cart = () => {
                 <span>Shipping</span>
                 <span className="text-green-600 font-medium">Free</span>
               </div>
-              {/* Removed Estimated Tax row */}
             </div>
 
             <div className="border-t border-gray-200 pt-4 mb-6">
               <div className="flex justify-between text-lg font-bold text-gray-900">
                 <span>Order Total</span>
-                {/* Now shows exactly cartTotal (no tax multiplier) */}
                 <span>${cartTotal.toFixed(2)}</span>
               </div>
             </div>
@@ -286,14 +271,12 @@ const Cart = () => {
               )}
             </button>
 
-            {/* Guest notice */}
             {isGuest && (
               <p className="text-sm text-gray-500 text-center mt-3">
                 Your cart items will be saved when you sign in
               </p>
             )}
 
-            {/* Trust Badges */}
             <div className="mt-6 pt-4 border-t border-gray-200 space-y-3">
               <div className="flex items-center gap-2 text-sm text-gray-600">
                 <Package className="w-4 h-4 text-amazon-orange" />

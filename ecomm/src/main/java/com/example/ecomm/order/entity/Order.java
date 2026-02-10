@@ -9,7 +9,6 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
-import jakarta.persistence.Transient; // Import this
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -57,11 +56,6 @@ public class Order {
     @Column(name = "created_at", nullable = false)
     @Builder.Default
     private Instant createdAt = Instant.now();
-
-    // --- NEW: Friendly Order Number (Not saved to DB, used for Email/UI) ---
-    @Transient
-    private Integer userOrderNumber;
-    // -----------------------------------------------------------------------
 
     @OneToMany(mappedBy = "order", orphanRemoval = true)
     @Builder.Default

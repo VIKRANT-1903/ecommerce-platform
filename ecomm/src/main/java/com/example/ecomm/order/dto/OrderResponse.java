@@ -9,7 +9,6 @@ import java.util.List;
 @Builder
 public record OrderResponse(
         Long orderId,            // Database ID (57)
-        Integer userOrderNumber, // Friendly ID (1) <-- ADD THIS
         Integer userId,
         BigDecimal totalAmount,
         String orderStatus,
